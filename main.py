@@ -241,7 +241,8 @@ def render_scan(result: dict) -> None:
         if it["has_idea"]:
             body = (f'<div class="so-seed">{html.escape(it["seed"])}</div>'
                     f'<div class="so-gnote" style="margin:4px 0 0">결핍·상실 · {html.escape(it["who"])}<br>원하는 것 · {html.escape(it["want"])} / '
-                    f'막는 것 · {html.escape(it["block"])}<br>역전 · {html.escape(it["twist"])}</div>')
+                    f'막는 것 · {html.escape(it["block"])}<br>역전 · {html.escape(it["twist"])}'
+                    + (f'<br>장르의 재미 · {html.escape(it["genre_core"])}' if it.get("genre_core") else "") + '</div>')
         else:
             body = f'<div class="so-gnote" style="margin:4px 0 0">빠진 조건 · {html.escape(", ".join(it["missing"]))}</div>'
         st.markdown(clean(f"""
@@ -264,7 +265,7 @@ def render_scan(result: dict) -> None:
 def meeting_section() -> None:
     st.markdown('<div id="so-meeting" class="so-group">아이디어 판별</div>'
                 '<div class="so-gnote">버튼을 누를 때만 일합니다. 소재 발굴 담당이 전 세계 현실 소재 5~8개를 찾고, 판별 담당이 소재마다 '
-                '① 결핍·상실을 가진 사람 ② 원하는 것과 막는 것 ③ 역전, 세 조건이 서는지만 가립니다. 이야기를 지어내지 않습니다. '
+                '① 결핍·상실을 가진 사람 ② 원하는 것과 막는 것 ③ 역전이 서는지만 가립니다. 장르 담당을 고르면 그 장르만의 자료처를 뒤지고 ④ 그 장르의 재미까지 봅니다. 이야기를 지어내지 않습니다. '
                 '키우는 일은 Idea Engine이 합니다.</div>', unsafe_allow_html=True)
     api_key, password = _secret("ANTHROPIC_API_KEY"), _secret("OFFICE_PASSWORD")
     if not api_key or not password:
@@ -285,13 +286,15 @@ def meeting_section() -> None:
     jobs = _jobs()
     running = any(j["status"] == "running" for j in jobs.values())
     with st.form("meeting"):
-        direction = st.text_input("소재 발굴 방향 한 줄 (비워 두면 넓게 찾습니다)",
-                                  placeholder="예: 베트남의 최근 사회 변화 / 사라지는 직업 / 일본 지방 소도시의 사건")
+        genre = st.selectbox("담당 장르", ["장르 없이 넓게"] + list(staff.GENRE_DESKS),
+                             help="장르 담당은 그 장르의 재미가 바로 생길 현실을 자기만의 곳에서 찾고, 그 장르의 재미가 서는지까지 함께 봅니다.")
+        direction = st.text_input("방향 한 줄 (비워도 됩니다)",
+                                  placeholder="예: 베트남 / 사라지는 직업 / 일본 지방 소도시")
         go = st.form_submit_button("소재 찾고 판별하기", type="primary", disabled=running)
     if running:
         st.caption("판별이 진행 중이라 끝난 뒤에 다시 시작할 수 있습니다.")
     if go and not running:
-        jid = _start_meeting(api_key, direction)
+        jid = _start_meeting(api_key, direction, "" if genre.startswith("장르 없이") else genre)
         st.session_state["job_id"] = jid
         st.rerun()
 
@@ -305,7 +308,8 @@ def meeting_section() -> None:
         with st.expander("진행 기록"):
             st.code("\n".join(job["log"]), language=None)
     elif job and job["status"] == "done":
-        st.caption(f"시작 {job['started_label']} · {job['elapsed']} 소요" + (f" · 방향: {job['direction']}" if job["direction"] else ""))
+        st.caption(f"시작 {job['started_label']} · {job['elapsed']} 소요 · {job.get('genre') or '장르 없이'}"
+                   + (f" · 방향: {job['direction']}" if job["direction"] else ""))
         try:
             render_scan(job["result"])
         except Exception as e:
@@ -325,7 +329,7 @@ def _log(job: dict, msg: str) -> None:
     print(f"[STORY OFFICE] {line}", flush=True)   # Streamlit 로그에도 남김
 
 
-def _start_meeting(api_key: str, direction: str) -> str:
+def _start_meeting(api_key: str, direction: str, genre: str = "") -> str:
     import threading
     import traceback
     import uuid
@@ -334,17 +338,17 @@ def _start_meeting(api_key: str, direction: str) -> str:
     jid = uuid.uuid4().hex[:8]
     now = datetime.now(KST)
     job = {"status": "running", "log": [], "result": None, "error": "", "started": now.timestamp(),
-           "started_label": f"{now:%m-%d %H:%M}", "elapsed": "", "direction": direction}
+           "started_label": f"{now:%m-%d %H:%M}", "elapsed": "", "direction": direction, "genre": genre}
     jobs[jid] = job
     for old in sorted(jobs, key=lambda k: jobs[k]["started"])[:-5]:   # 최근 5건만 보관
         jobs.pop(old, None)
 
     def work():
         import anthropic
-        _log(job, f"시작 · 방향: {direction or '자유'}")
+        _log(job, f"시작 · {genre or '장르 없이'} · 방향: {direction or '자유'}")
         try:
             client = anthropic.Anthropic(api_key=api_key)
-            result = staff.run_scan(client, direction, progress=lambda m: _log(job, m))
+            result = staff.run_scan(client, direction, progress=lambda m: _log(job, m), genre=genre)
             job["result"] = result
             job["status"] = "done"
             _log(job, f"끝 · 이야기 있음 {sum(i['has_idea'] for i in result['items'])}/{len(result['items'])} · 검색 {result['searches']}회")
