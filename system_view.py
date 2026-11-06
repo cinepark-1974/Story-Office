@@ -23,7 +23,7 @@ OUTER = (500, 292)   # 바깥 궤도
 CORE_R = 100         # 중심 구체 반지름 (실이 닿는 곳)
 FRAME_HEIGHT = 630   # Streamlit 안에서 이 그림이 차지하는 높이(px)
 
-CORE_TIP = ("STORY ENGINE SYSTEM — 모든 엔진의 공통 설계: GitHub 저장소 → Streamlit 앱, main.py에서 시작, "
+CORE_TIP = ("STORY ENGINE SYSTEM 개발실 열기 — 모든 엔진의 공통 설계: GitHub 저장소 → Streamlit 앱, main.py에서 시작, "
             "Claude API 연산, 블루진픽처스 기획개발 규칙. 판단 기준은 언어모델이 아니라 엔진의 규칙에 있습니다.")
 
 _CORE_IMG = Path(__file__).parent / "static" / "core.webp"
@@ -58,7 +58,7 @@ def _bodies(groups: list, partner: dict) -> list:
     return out
 
 
-def build_html(groups: list, partner: dict) -> str:
+def build_html(groups: list, partner: dict, system_project: str | None = None) -> str:
     core_b64 = base64.b64encode(_CORE_IMG.read_bytes()).decode()
     data = {
         "W": W, "H": H, "CX": CX, "CY": CY, "INNER": INNER, "OUTER": OUTER, "CORE_R": CORE_R,
@@ -68,6 +68,7 @@ def build_html(groups: list, partner: dict) -> str:
         "branchFrom": "CREATOR",
         "branchTo": [e["short"] for e in groups[1]["engines"]],
         "coreTip": CORE_TIP,
+        "coreUrl": system_project,
     }
     return (_TEMPLATE
             .replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
@@ -104,7 +105,7 @@ a{cursor:pointer;}
 <body><div id="wrap">
 <svg id="sys" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="STORY ENGINE SYSTEM">
   <g id="lOrbit"></g><g id="lLines"></g>
-  <g><title>__CORE_TIP__</title><image href="__CORE__" x="430" y="180" width="340" height="340"/></g>
+  <g id="core"><title>__CORE_TIP__</title><image href="__CORE__" x="430" y="180" width="340" height="340"/></g>
   <g id="lBodies"></g>
 </svg></div>
 <script>
@@ -118,6 +119,8 @@ el("ellipse",{class:"orbit",cx:D.CX,cy:D.CY,rx:D.OUTER[0],ry:D.OUTER[1]},$("lOrb
 el("ellipse",{class:"orbit",cx:D.CX,cy:D.CY,rx:D.INNER[0],ry:D.INNER[1]},$("lOrbit"));
 
 const relay = el("polyline",{class:"relay"},$("lLines"));
+// 가운데 구체 — 누르면 STORY ENGINE SYSTEM 개발실(시스템 전체를 다루는 Claude 프로젝트)
+if(D.coreUrl){ const core=$("core"); const a=el("a",{href:D.coreUrl,target:"_blank"}); core.parentNode.insertBefore(a,core); a.appendChild(core); }
 const byId = {};
 let paused = false;
 

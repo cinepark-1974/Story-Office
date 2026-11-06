@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-from engines import DESKS, GITHUB_OWNER, GROUPS, OFFICE_H, OFFICE_W, PARTNER
+from engines import DESKS, GITHUB_OWNER, GROUPS, OFFICE_H, OFFICE_W, PARTNER, SYSTEM_PROJECT
 from system_view import FRAME_HEIGHT, build_html
 
 KST = timezone(timedelta(hours=9))
@@ -75,7 +75,10 @@ header[data-testid="stHeader"] { background:transparent; }
   min-height:176px; display:flex; flex-direction:column; margin-bottom:14px; }
 .so-name { font-size:17px; font-weight:900; color:var(--ink); }
 .so-desc { font-size:13.5px; color:var(--ink); line-height:1.55; margin:8px 0 12px; flex:1; }
-.so-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; border-top:1px solid var(--line); padding-top:10px; }
+.so-foot { display:flex; align-items:center; justify-content:flex-end; gap:6px; border-top:1px solid var(--line); padding-top:10px; margin-top:8px; }
+.so-dev { display:inline-block; color:var(--yale) !important; text-decoration:none !important; font-size:13px; font-weight:700;
+  padding:6px 11px; border:1px solid var(--yale); border-radius:4px; white-space:nowrap; background:#FFFFFF; }
+.so-dev:hover { background:var(--glacier); }
 .so-date { font-size:11.5px; color:var(--muted); line-height:1.45; }
 .so-date b { display:block; white-space:nowrap; color:var(--ink); font-weight:700; }
 .so-date.fresh b { color:var(--gold); }
@@ -188,16 +191,16 @@ def partner_card() -> None:
 
 def render_card(engine: dict) -> str:
     label, fresh = describe_date(pushed.get(engine["repo"]))
-    action = (f'<a class="so-go" href="{html.escape(engine["url"])}" target="_blank">열기</a>'
+    action = (f'<a class="so-go" href="{html.escape(engine["url"])}" target="_blank" title="엔진 앱 열기">열기</a>'
               if engine["url"] else '<span class="so-none">앱 없음</span>')
+    dev = (f'<a class="so-dev" href="{html.escape(engine["project"])}" target="_blank" '
+           f'title="이 엔진을 고치는 Claude 프로젝트방">개발실</a>' if engine.get("project") else "")
     return clean(f"""
 <div class="so-card">
   <div class="so-name">{html.escape(engine["name"])}</div>
   <div class="so-desc">{html.escape(engine["desc"])}</div>
-  <div class="so-foot">
-    <div class="so-date{' fresh' if fresh else ''}">최근 수정<b>{label}</b></div>
-    {action}
-  </div>
+  <div class="so-date{' fresh' if fresh else ''}">최근 수정<b>{label}</b></div>
+  <div class="so-foot">{dev}{action}</div>
 </div>""")
 
 
@@ -238,13 +241,13 @@ def office_page() -> None:
 def system_page() -> None:
     header("STORY ENGINE SYSTEM")
     try:
-        page = build_html(GROUPS, PARTNER)   # 이 앱이 직접 만든 HTML만 넣습니다
+        page = build_html(GROUPS, PARTNER, SYSTEM_PROJECT)   # 이 앱이 직접 만든 HTML만 넣습니다
         if hasattr(st, "iframe"):            # Streamlit 새 방식
             st.iframe(page, height=FRAME_HEIGHT)
         else:                                # 예전 Streamlit 대비
             components.html(page, height=FRAME_HEIGHT)
         st.markdown('<div class="so-hint">행성을 누르면 그 엔진이 열립니다. 행성 위에 마우스를 올리면 전체가 잠시 멈추고 설명이 보입니다. '
-                    '가운데 구체에 마우스를 올리면 모든 엔진의 공통 설계가 보입니다.</div>', unsafe_allow_html=True)
+                    '가운데 구체를 누르면 시스템 전체를 다루는 STORY ENGINE SYSTEM 개발실이 열립니다.</div>', unsafe_allow_html=True)
     except Exception as e:
         st.markdown(f'<div class="so-err">성계 그림을 그리지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
 
