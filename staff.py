@@ -161,7 +161,7 @@ def _call(client, system: str, user: str, max_tokens: int, max_search: int = 0) 
     """응답 글, 실제로 검색된 문서 목록, 검색 횟수를 돌려줍니다. 긴 검색은 pause_turn 을 이어 받습니다."""
     messages = [{"role": "user", "content": user}]
     types = _search_type or SEARCH_TOOL_TYPES
-    sources, searches, texts = [], 0, []
+    sources, searches, texts, stop = [], 0, [], ""
     for t_i, ttype in enumerate(types if max_search else [None]):
         kwargs = dict(model=MODEL, max_tokens=max_tokens, system=system, messages=list(messages))
         if ttype:
@@ -184,7 +184,8 @@ def _call(client, system: str, user: str, max_tokens: int, max_search: int = 0) 
                                     sources.append({"url": url, "title": title, "page_age": age})
                     elif bt == "text":
                         texts.append(getattr(b, "text", ""))
-                if getattr(resp, "stop_reason", "") == "pause_turn":
+                stop = getattr(resp, "stop_reason", "") or ""
+                if stop == "pause_turn":
                     kwargs["messages"] = kwargs["messages"] + [{"role": "assistant", "content": resp.content}]
                     continue
                 break
@@ -196,14 +197,68 @@ def _call(client, system: str, user: str, max_tokens: int, max_search: int = 0) 
             if ttype and t_i < len(types) - 1 and ("tool" in str(e).lower() or "400" in str(e)):
                 continue
             raise
-    return {"text": "".join(texts).strip(), "sources": sources, "searches": searches}
+    return {"text": "".join(texts).strip(), "sources": sources, "searches": searches, "stop": stop}
 
 
 def _json(text: str) -> dict:
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
+    """응답에서 JSON 객체를 찾습니다. ```json 블록 → 괄호 짝이 맞는 가장 큰 객체 순."""
+    for block in re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S):
+        try:
+            return json.loads(block)
+        except Exception:
+            pass
+    best = None
+    for start in [m.start() for m in re.finditer(r"\{", text)]:
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                esc = (ch == "\\") and not esc
+                if ch == '"' and not esc:
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(text[start:i + 1])
+                        if best is None or len(text[start:i + 1]) > best[0]:
+                            best = (i + 1 - start, obj)
+                    except Exception:
+                        pass
+                    break
+        if best and best[0] > len(text) * 0.5:
+            break
+    if best is None:
         raise ValueError("응답에서 JSON을 찾지 못했습니다.")
-    return json.loads(m.group(0))
+    return best[1]
+
+
+def _ask_json(client, system: str, user: str, max_tokens: int, max_search: int = 0, who: str = "") -> tuple[dict, dict]:
+    """한 번 묻고, 형식이 어긋나면(길이 초과로 끊김 포함) 찾은 문서를 들고 한 번 더 형식만 다시 받습니다."""
+    res = _call(client, system, user, max_tokens, max_search)
+    try:
+        return _json(res["text"]), res
+    except Exception:
+        pass
+    found = "\n".join(f"- {x['title']} {x['url']}" for x in res["sources"][:30])
+    retry = (
+        f"{user}\n\n[앞선 답] 형식에 맞지 않았거나 길이 초과로 끊겼다(stop={res['stop']}). 아래 내용을 바탕으로 지정한 JSON만 다시 써라. "
+        "설명 문장 없이 JSON만, 각 항목은 더 짧게. 주소는 아래 '찾은 문서'에 있는 것만 쓴다.\n"
+        f"[앞선 답 일부]\n{res['text'][-3000:]}\n[찾은 문서]\n{found or '(없음)'}"
+    )
+    res2 = _call(client, system, retry, int(max_tokens * 1.5), 0)
+    try:
+        data = _json(res2["text"])
+    except Exception:
+        head = (res2["text"] or res["text"])[:200].replace("\n", " ")
+        raise ValueError(f"{who}: 형식에 맞는 답을 두 번 다 받지 못했습니다 (stop={res2['stop'] or res['stop']}). 응답 앞부분: {head}")
+    res["text"] = res2["text"]
+    return data, res
 
 
 def _clean(obj):
@@ -290,10 +345,10 @@ def scout(client, direction: str, ledger: Ledger) -> dict:
         "urls 에는 이번에 실제로 검색해서 본 주소만 넣는다.\n"
         + (f"이번 발굴 방향 (Mr. MOON 지시): {direction}" if direction.strip() else "이번 발굴 방향: 자유. 나라와 분야를 넓게 본다.")
     )
-    res = _call(client, system, user, max_tokens=3000, max_search=r["search"][1])
+    data, res = _ask_json(client, system, user, 6000, r["search"][1], r["title"])
     ledger.count(res["searches"])
     ledger.add(res["sources"], r["title"])
-    data = _clean(_json(res["text"]))
+    data = _clean(data)
     kept = []
     for c in data.get("candidates", []):
         ids = [ledger.sid(u) for u in c.get("urls", []) if ledger.sid(u)]
@@ -319,8 +374,8 @@ def write_pitch(client, direction: str, scouting: dict, ledger: Ledger, no: int,
         '"why_now":"이 현실 소재가 왜 지금 이야기가 되는가 2~3문장"}\n\n'
         f"[소재 후보]\n{cands}\n\n" + (f"[Mr. MOON 지시] {direction}" if direction.strip() else "")
     )
-    res = _call(client, system, user, max_tokens=2500)
-    idea = _clean(_json(res["text"]))
+    idea, _res = _ask_json(client, system, user, 3500, 0, r["title"])
+    idea = _clean(idea)
     idea["material_ids"] = [i for i in idea.get("material_ids", []) if any(s["id"] == i for s in ledger.items)]
     idea["no"], idea["date"] = no, date
     idea.setdefault("scenes", [])
@@ -354,10 +409,10 @@ def _opinion(client, key: str, idea: dict, ledger: Ledger) -> dict:
         f'{{{mark},"one_line":"한 문장 판단","points":[{{"text":"사건·장면 단위 지적","basis":"인용: 아이디어 문장 그대로 | https://검색한 주소"}}],'
         f'"undecided":["근거가 없어 판단 못 한 항목"]{_EXTRA.get(key, "")}}}\n\n{idea_sheet(idea)}'
     )
-    res = _call(client, system, user, max_tokens=1600, max_search=n)
+    out, res = _ask_json(client, system, user, 3000, n, r["title"])
     ledger.count(res["searches"])
     ledger.add(res["sources"], r["title"])
-    out = _clean(_json(res["text"]))
+    out = _clean(out)
     out["role"], out["searches"] = key, res["searches"]
     out["points"] = _check_points(out.get("points"), idea_sheet(idea), ledger)
     out["excluded"] = bool(must and res["searches"] == 0)
@@ -419,11 +474,11 @@ def editor(client, idea: dict, opinions: dict, ledger: Ledger, progress) -> dict
     system = f"너는 BLUE JEANS PICTURES 기획 회의의 {r['title']}다. 기준: {r['criteria']} {HOUSE_RULES}"
 
     # 4-1 포맷 점수 (사건 밀도와 인물 수로만)
-    res = _call(client, system, (
+    fmt, _r = _ask_json(client, system, (
         "아래 아이디어의 사건 밀도와 인물 수만 근거로 각 포맷의 적합도를 0~10 정수로 매겨 JSON으로만 답하라.\n"
         f'{{"scores":{{{",".join(f"{json.dumps(k, ensure_ascii=False)}:0" for k in FORMAT_ROUTES)}}},"basis":"사건 수와 인물 수를 근거로 한두 문장"}}\n\n'
-        f"{idea_sheet(idea)}"), max_tokens=700)
-    fmt = _clean(_json(res["text"]))
+        f"{idea_sheet(idea)}"), 1200, 0, r["title"])
+    fmt = _clean(fmt)
     conf = format_confidence(fmt.get("scores", {}))
 
     # 4-2 특수 포맷이 1·2순위면 그 담당을 부른다
@@ -448,15 +503,15 @@ def editor(client, idea: dict, opinions: dict, ledger: Ledger, progress) -> dict
     fields = ENGINE_INPUTS.get(path[0], []) if path else []
 
     # 4-3 회의록
-    res = _call(client, system, (
+    minutes, _r = _ask_json(client, system, (
         "아래 회의 결과를 정리해 JSON으로만 답하라. 판정과 배정은 이미 규칙으로 정해졌으니 바꾸지 말고 이유만 쓴다.\n"
         f"[판정] {verdict['verdict']} (Hook {verdict['hook_total']}/50, 시장성 별 {verdict['stars']}, 치명적 유사작 {'있음' if verdict['fatal'] else '없음'})\n"
         f"[포맷 확신도] {conf['level']} {conf['ranked'][:3]}\n[배정] {assignment}\n"
         '{"summary":"회의 결론 2~3문장","issues":["쟁점"],"tasks":["보완 과제 1","보완 과제 2","보완 과제 3"],'
         '"reason":"판정과 배정을 가른 지적 1~2문장","engine_input":{' + ",".join(f'"{f}":""' for f in fields) + "}}\n"
         "보완 과제는 아이디어를 고쳐 쓰지 말고 무엇이 비었는지만 말한다. engine_input 은 아이디어에 있는 내용만으로 채운다.\n\n"
-        f"{idea_sheet(idea)}\n\n[근거가 확인된 참석자 의견]\n" + "\n".join(lines)), max_tokens=2000)
-    minutes = _clean(_json(res["text"]))
+        f"{idea_sheet(idea)}\n\n[근거가 확인된 참석자 의견]\n" + "\n".join(lines)), 3500, 0, r["title"])
+    minutes = _clean(minutes)
     minutes.update({"assignment": assignment, "verdict": verdict, "format": conf, "format_basis": fmt.get("basis", "")})
     return minutes
 
