@@ -98,10 +98,9 @@ svg{display:block;width:100%;height:100%;font-family:'Paperlogy','Pretendard',sa
 .lbl{fill:#F7FBFC;font-weight:700;text-anchor:middle;letter-spacing:.06em;}
 .sub{fill:rgba(247,251,252,.55);text-anchor:middle;font-size:11px;}
 .probe{fill:#DBA12C;}
-.admin rect.panel{fill:rgba(143,211,228,.12);stroke:#8FD3E4;stroke-width:1.6;}
-.admin line{stroke:#DDF1F7;stroke-width:2;stroke-linecap:round;}
-.admin circle.knob{fill:#DBA12C;}
-.admin:hover rect.panel{fill:rgba(143,211,228,.35);stroke:#FFFFFF;}
+.giantRim{fill:none;stroke:#E8D6B0;stroke-width:1.5;}
+.admin:hover .giantRim{stroke:#FFFFFF;stroke-width:3;}
+.admin:hover .halo{fill:rgba(219,161,44,.25);}
 a{cursor:pointer;}
 .hot .body{fill:#FFFFFF;stroke:#FFFFFF;stroke-width:3;}
 .hot .halo{fill:rgba(143,211,228,.32);}
@@ -153,15 +152,25 @@ for(const b of D.bodies){
 }
 const branches = D.branchTo.map(()=>el("line",{class:"branch"},$("lLines")));
 
-// 앱 관리 단추 — 누르면 Streamlit 내 앱 목록(리부트). 상표 로고 대신 제어판 모양 표시.
+// 앱 관리 행성 — 줄무늬 거대 행성. 누르면 Streamlit 내 앱 목록(리부트).
 if(D.admin){
   const a = el("a",{href:D.admin.url,target:"_blank",class:"admin"},$("lBodies"));
   const g = el("g",{transform:`translate(${D.admin.x} ${D.admin.y})`},a);
   el("title",{},g).textContent = "Streamlit 앱 관리 · 엔진을 고친 뒤 여기서 리부트합니다";
-  el("rect",{class:"panel",x:-22,y:-18,width:44,height:36,rx:7},g);
-  [-8,0,8].forEach((dy,i)=>{ el("line",{x1:-12,y1:dy,x2:12,y2:dy},g); el("circle",{class:"knob",cx:[-5,6,-1][i],cy:dy,r:3},g); });
-  const t = el("text",{class:"lbl",y:36,"font-size":12},g); t.textContent = "APP CONTROL";
-  const s2 = el("text",{class:"sub",y:51},g); s2.textContent = "Streamlit 앱 관리";
+  const R = 27;
+  const defs = el("defs",{},g);
+  const cp = el("clipPath",{id:"giantClip"},defs);
+  el("circle",{r:R},cp);
+  el("circle",{class:"halo",r:R+10},g);
+  const body = el("g",{"clip-path":"url(#giantClip)"},g);
+  el("rect",{x:-R,y:-R,width:2*R,height:2*R,fill:"#EFE3C8"},body);
+  [[-22,5,"#D9B98A"],[-12,7,"#C99A5B"],[-2,4,"#E8D6B0"],[5,8,"#B9824A"],[16,5,"#D9B98A"]].forEach(([y,h,c])=>{
+    el("rect",{x:-R,y:y,width:2*R,height:h,fill:c},body);
+  });
+  el("ellipse",{cx:9,cy:9,rx:6,ry:3.4,fill:"#A8623A"},body);   // 큰 점
+  el("circle",{class:"giantRim",r:R},g);
+  const t = el("text",{class:"lbl",y:R+18,"font-size":12},g); t.textContent = "APP CONTROL";
+  const s2 = el("text",{class:"sub",y:R+33},g); s2.textContent = "Streamlit 앱 관리";
 }
 $("lLines").insertBefore(relay, null);
 
