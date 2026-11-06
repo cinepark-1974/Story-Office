@@ -18,6 +18,9 @@ from system_view import FRAME_HEIGHT, build_html
 
 KST = timezone(timedelta(hours=9))
 
+# Streamlit 내 앱 목록. 앱 옆 ⋮ 메뉴 → Reboot 로 엔진을 다시 시작합니다.
+STREAMLIT_ADMIN = "https://share.streamlit.io/"
+
 st.set_page_config(page_title="STORY OFFICE", page_icon="🔵", layout="wide")
 
 
@@ -41,6 +44,9 @@ header[data-testid="stHeader"] { background:transparent; }
 .so-brand { font-size:12px; letter-spacing:.18em; color:var(--muted); font-weight:700; }
 .so-title { font-size:34px; font-weight:900; color:var(--yale); line-height:1.1; margin-top:4px; }
 .so-meta { font-size:13px; color:var(--muted); text-align:right; }
+.so-admin { display:inline-block; margin-top:6px; font-size:12px; font-weight:700; color:var(--yale) !important;
+  text-decoration:none !important; border:1px solid var(--line); border-radius:4px; padding:4px 9px; background:var(--glacier); }
+.so-admin:hover { border-color:var(--yale); }
 .so-meta b { color:var(--gold); font-weight:900; font-size:18px; }
 .so-sys { background:var(--space); border-radius:8px; margin:22px 0 6px; overflow:hidden; }
 .so-sys svg { display:block; width:100%; height:auto; }
@@ -140,7 +146,8 @@ def header(title: str) -> None:
     st.markdown(clean(f"""
 <div class="so-top">
   <div><div class="so-brand">BLUE JEANS PICTURES · STORY ENGINE SYSTEM</div><div class="so-title">{title}</div></div>
-  <div class="so-meta">엔진 <b>{live}</b> / {len(all_engines)} 가동 중<br>{now:%Y-%m-%d %H:%M} 기준</div>
+  <div class="so-meta">엔진 <b>{live}</b> / {len(all_engines)} 가동 중<br>{now:%Y-%m-%d %H:%M} 기준<br>
+  <a class="so-admin" href="{STREAMLIT_ADMIN}" target="_blank" title="엔진을 고친 뒤 리부트할 때 씁니다">Streamlit 앱 관리 · 리부트</a></div>
 </div>"""), unsafe_allow_html=True)
 
 

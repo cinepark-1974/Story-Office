@@ -16,7 +16,7 @@ GITHUB_OWNER = "cinepark-1974"
 # Writer's Partner — 엔진이 아니라 엔진들이 못 하는 손질을 맡는 파트너.
 PARTNER = {
     "name": "Writer's Partner",
-    "url": None,  # TODO: https://claude.ai/project/... 주소로 바꿉니다
+    "url": "https://claude.ai/",  # Writer's Partner 프로젝트 주소(https://claude.ai/project/...)를 받으면 그 주소로 바꿉니다
     "desc": "엔진이 못 하는 손질을 맡습니다. 문장 호흡, 장면 정서, 대사 결, 엔진 출력물 다듬기를 대화로 함께합니다.",
     "orbit": ("outer", 90),  # 보는 사람 쪽, 성계의 맨 앞
 }
