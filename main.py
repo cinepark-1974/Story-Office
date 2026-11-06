@@ -16,6 +16,7 @@ import streamlit.components.v1 as components
 from engines import DESKS, GITHUB_OWNER, GROUPS, OFFICE_H, OFFICE_W, PARTNER, SYSTEM_PROJECT
 from system_view import FRAME_HEIGHT, build_html
 import staff
+import storage
 
 KST = timezone(timedelta(hours=9))
 
@@ -221,12 +222,26 @@ def _secret(name: str) -> str:
         return ""
 
 
+@st.cache_resource
+def _archive():
+    """R2 보관함. Secrets가 없거나 연결이 안 되면 (None, 이유)."""
+    try:
+        arc = storage.from_secrets(_secret)
+        if arc is None:
+            return None, ""
+        arc.check()
+        return arc, ""
+    except Exception as e:
+        print(f"[STORY OFFICE] R2 연결 실패 {type(e).__name__}: {e}", flush=True)
+        return None, f"{type(e).__name__}: {e}"
+
+
 def _badge(mark: str) -> str:
     cls = {"통과": "ok", "맞음": "ok", "보완": "mid", "조건부": "mid", "불가": "no", "안 맞음": "no"}.get(mark, "mid")
     return f'<span class="so-badge {cls}">{html.escape(mark or "")}</span>'
 
 
-def render_scan(result: dict) -> None:
+def render_scan(result: dict, scan_id: str = "", genre: str = "", ui: str = "now") -> None:
     src = {x["id"]: x for x in result["sources"]}
     items = result["items"]
     yes = [i for i in items if i["has_idea"]]
@@ -234,10 +249,19 @@ def render_scan(result: dict) -> None:
                 f'검색 {result["searches"]}회' + (f' · 출처 없는 소재 {result["dropped"]}개 버림' if result.get("dropped") else "") + '</div>',
                 unsafe_allow_html=True)
     idea_url = ENGINE_BY_SHORT.get("IDEA", {}).get("url")
+    arc, _err = _archive()
+    decided = {}
+    if arc and scan_id:
+        try:
+            decided = arc.decided(genre, scan_id)
+        except Exception as e:
+            st.caption(f"지난 결정 기록을 읽지 못했습니다. {e}")
     for n, it in enumerate(items):
         links = " ".join(f'<a class="so-src ok" href="{html.escape(src[i]["url"])}" target="_blank" title="{html.escape(src[i]["title"])}">출처{k}</a>'
                          for k, i in enumerate(it.get("ids", []), 1) if i in src)
         badge = '<span class="so-verdict go">있음</span>' if it["has_idea"] else '<span class="so-verdict nogo">없음</span>'
+        if it["name"] in decided:
+            badge += f' <span class="so-badge {"ok" if decided[it["name"]] == "넘김" else "no"}">{decided[it["name"]]}</span>'
         if it["has_idea"]:
             body = (f'<div class="so-seed">{html.escape(it["seed"])}</div>'
                     f'<div class="so-gnote" style="margin:4px 0 0">결핍·상실 · {html.escape(it["who"])}<br>원하는 것 · {html.escape(it["want"])} / '
@@ -256,10 +280,22 @@ def render_scan(result: dict) -> None:
                 st.code(staff.idea_engine_input(it), language=None)
                 if idea_url:
                     st.link_button("Idea Engine 열기", idea_url)
+                if arc and scan_id:
+                    st.caption("넘김과 버림을 남기면 이 장르 담당이 다음 판별 때 읽고, 같은 소재는 다시 가져오지 않습니다.")
+                    reason = st.text_input("버리는 이유 (선택)", key=f"why_{ui}_{scan_id}_{n}",
+                                           placeholder="예: 이미 다큐로 나옴 / 너무 지역적")
+                    c1, c2 = st.columns(2)
+                    for col, label in ((c1, "넘김"), (c2, "버림")):
+                        if col.button(label, key=f"{label}_{ui}_{scan_id}_{n}", use_container_width=True):
+                            try:
+                                arc.record(genre, scan_id, it, label, reason if label == "버림" else "")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"기록하지 못했습니다. {e}")
     all_text = "\n\n".join(f"■ {it['name']} ({'있음' if it['has_idea'] else '없음'})\n{it['fact']}\n"
                             + (staff.idea_engine_input(it) if it["has_idea"] else "빠진 조건: " + ", ".join(it["missing"]))
                             + "\n출처: " + " ".join(src[i]["url"] for i in it.get("ids", []) if i in src) for it in items)
-    st.download_button("목록 전체를 텍스트로 받기", all_text, file_name=f"STORY_OFFICE_소재판별_{datetime.now(KST):%Y%m%d_%H%M}.txt")
+    st.download_button("목록 전체를 텍스트로 받기", all_text, file_name=f"STORY_OFFICE_소재판별_{datetime.now(KST):%Y%m%d_%H%M}.txt", key=f"dl_{ui}_{scan_id}")
 
 
 def meeting_section() -> None:
@@ -283,6 +319,14 @@ def meeting_section() -> None:
                     st.error("비밀번호가 맞지 않습니다.")
         return
 
+    arc, arc_err = _archive()
+    if arc:
+        st.caption("기록 보관함(R2) 연결됨 · 판별 결과와 넘김·버림이 저장됩니다.")
+    elif arc_err:
+        st.warning(f"기록 보관함(R2)에 연결하지 못했습니다. Secrets의 R2 값 네 개를 확인해 주십시오. ({arc_err})")
+    else:
+        st.caption("기록 보관함(R2) 없이 돌아가는 중입니다. 판별 결과는 앱이 다시 시작되면 사라집니다.")
+
     jobs = _jobs()
     running = any(j["status"] == "running" for j in jobs.values())
     with st.form("meeting"):
@@ -294,7 +338,7 @@ def meeting_section() -> None:
     if running:
         st.caption("판별이 진행 중이라 끝난 뒤에 다시 시작할 수 있습니다.")
     if go and not running:
-        jid = _start_meeting(api_key, direction, "" if genre.startswith("장르 없이") else genre)
+        jid = _start_meeting(api_key, direction, "" if genre.startswith("장르 없이") else genre, arc)
         st.session_state["job_id"] = jid
         st.rerun()
 
@@ -310,10 +354,33 @@ def meeting_section() -> None:
     elif job and job["status"] == "done":
         st.caption(f"시작 {job['started_label']} · {job['elapsed']} 소요 · {job.get('genre') or '장르 없이'}"
                    + (f" · 방향: {job['direction']}" if job["direction"] else ""))
+        if job.get("save_error"):
+            st.caption(f"보관함에 저장하지 못했습니다. {job['save_error']}")
         try:
-            render_scan(job["result"])
+            render_scan(job["result"], jid, job.get("genre", ""))
         except Exception as e:
             st.markdown(f'<div class="so-err">결과를 그리지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
+    if arc:
+        past_scans(arc)
+
+
+def past_scans(arc) -> None:
+    try:
+        keys = arc.list_scans()
+    except Exception as e:
+        st.caption(f"지난 판별 목록을 읽지 못했습니다. {e}")
+        return
+    if not keys:
+        return
+    def label(k: str) -> str:   # scans/20261107_0130_ab12cd34.json
+        d = k.split("/")[-1][:13]
+        return f"{d[4:6]}-{d[6:8]} {d[9:11]}:{d[11:13]}"
+    with st.expander(f"지난 판별 다시 보기 ({len(keys)}건)"):
+        key = st.selectbox("판별 고르기", keys, format_func=label, label_visibility="collapsed")
+        data = arc.load_scan(key) if key else None
+        if data:
+            st.caption(f"{data.get('genre') or '장르 없이'}" + (f" · 방향: {data['direction']}" if data.get("direction") else ""))
+            render_scan(data["result"], data["id"], data.get("genre", ""), ui="past")
 
 
 # ---------- 회의는 서버가 따로 끝까지 진행합니다 ----------
@@ -329,7 +396,7 @@ def _log(job: dict, msg: str) -> None:
     print(f"[STORY OFFICE] {line}", flush=True)   # Streamlit 로그에도 남김
 
 
-def _start_meeting(api_key: str, direction: str, genre: str = "") -> str:
+def _start_meeting(api_key: str, direction: str, genre: str = "", arc=None) -> str:
     import threading
     import traceback
     import uuid
@@ -348,7 +415,13 @@ def _start_meeting(api_key: str, direction: str, genre: str = "") -> str:
         _log(job, f"시작 · {genre or '장르 없이'} · 방향: {direction or '자유'}")
         try:
             client = anthropic.Anthropic(api_key=api_key)
-            result = staff.run_scan(client, direction, progress=lambda m: _log(job, m), genre=genre)
+            memory = ""
+            if arc:
+                try:
+                    memory = storage.memory_note(arc.decisions(genre))
+                except Exception as e:
+                    _log(job, f"지난 기록을 읽지 못해 기록 없이 진행합니다 ({e})")
+            result = staff.run_scan(client, direction, progress=lambda m: _log(job, m), genre=genre, memory=memory)
             job["result"] = result
             job["status"] = "done"
             _log(job, f"끝 · 이야기 있음 {sum(i['has_idea'] for i in result['items'])}/{len(result['items'])} · 검색 {result['searches']}회")
@@ -360,6 +433,12 @@ def _start_meeting(api_key: str, direction: str, genre: str = "") -> str:
         finally:
             sec = int(datetime.now(KST).timestamp() - job["started"])
             job["elapsed"] = f"{sec // 60}분 {sec % 60}초"
+        if arc and job["status"] == "done":
+            try:
+                _log(job, "보관함 저장 " + arc.save_scan(jid, job))
+            except Exception as e:
+                job["save_error"] = str(e)
+                _log(job, f"보관함 저장 실패 {e}")
 
     threading.Thread(target=work, daemon=True).start()
     return jid

@@ -219,7 +219,7 @@ class Ledger:
 
 
 # ── 1. 소재 발굴 ─────────────────────────────────────────
-def scout(client, direction: str, ledger: Ledger, genre: str = "") -> dict:
+def scout(client, direction: str, ledger: Ledger, genre: str = "", memory: str = "") -> dict:
     desk = GENRE_DESKS.get(genre)
     system = (
         "너는 BLUE JEANS PICTURES 기획실의 소재 발굴 담당이다. 영화·드라마·웹소설 등 기존 작품은 찾지 않는다. "
@@ -234,6 +234,7 @@ def scout(client, direction: str, ledger: Ledger, genre: str = "") -> dict:
         '"urls":["이 사실을 확인한 문서 주소"]}]}\n'
         "urls 에는 이번에 실제로 검색해서 본 주소만 넣는다. 해석이나 이야기 아이디어는 쓰지 않는다.\n"
         + (f"이번 발굴 방향 (Mr. MOON 지시): {direction}" if direction.strip() else "이번 발굴 방향: 자유. 나라와 분야를 넓게 본다.")
+        + (f"\n\n{memory}" if memory else "")
     )
     who = f"{genre} 담당" if desk else "소재 발굴 담당"
     data, res = _ask_json(client, system, user, 5000, 8, who)
@@ -294,14 +295,16 @@ def gate(client, candidates: list[dict], direction: str = "", genre: str = "") -
 
 
 # ── 전체 ───────────────────────────────────────────────
-def run_scan(client, direction: str = "", progress=None, genre: str = "") -> dict:
+def run_scan(client, direction: str = "", progress=None, genre: str = "", memory: str = "") -> dict:
     say = progress or (lambda _m: None)
     ledger = Ledger()
     if genre in GENRE_DESKS:
         say(f"{genre} 담당이 찾고 있습니다: {GENRE_DESKS[genre]['where']}")
     else:
         say("소재 발굴 담당이 전 세계 뉴스·보고서·제도를 검색하고 있습니다")
-    sc = scout(client, direction, ledger, genre)
+    if memory:
+        say("지난 넘김·버림 기록을 읽고 시작합니다")
+    sc = scout(client, direction, ledger, genre, memory)
     if not sc["candidates"]:
         raise RuntimeError("실제 검색 근거가 있는 소재를 찾지 못했습니다. 방향을 바꿔 다시 시도해 주십시오.")
     say(f"판별 담당이 소재 {len(sc['candidates'])}개에 이야기가 있는지 가리고 있습니다")
