@@ -34,6 +34,8 @@ def _bodies(groups: list, partner: dict) -> list:
     out = []
     for g in groups:
         for e in g["engines"]:
+            if not e["url"]:      # 앱이 없는 도구(Converter)는 성계에 넣지 않습니다
+                continue
             o = e["orbit"]
             is_core = e["short"] in core_names
             body = {
@@ -58,7 +60,7 @@ def _bodies(groups: list, partner: dict) -> list:
     return out
 
 
-def build_html(groups: list, partner: dict, system_project: str | None = None) -> str:
+def build_html(groups: list, partner: dict, system_project: str | None = None, admin_url: str | None = None) -> str:
     core_b64 = base64.b64encode(_CORE_IMG.read_bytes()).decode()
     data = {
         "W": W, "H": H, "CX": CX, "CY": CY, "INNER": INNER, "OUTER": OUTER, "CORE_R": CORE_R,
@@ -69,6 +71,7 @@ def build_html(groups: list, partner: dict, system_project: str | None = None) -
         "branchTo": [e["short"] for e in groups[1]["engines"]],
         "coreTip": CORE_TIP,
         "coreUrl": system_project,
+        "admin": {"url": admin_url, "x": 1090, "y": 650} if admin_url else None,
     }
     return (_TEMPLATE
             .replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
@@ -95,6 +98,10 @@ svg{display:block;width:100%;height:100%;font-family:'Paperlogy','Pretendard',sa
 .lbl{fill:#F7FBFC;font-weight:700;text-anchor:middle;letter-spacing:.06em;}
 .sub{fill:rgba(247,251,252,.55);text-anchor:middle;font-size:11px;}
 .probe{fill:#DBA12C;}
+.admin rect.panel{fill:rgba(143,211,228,.12);stroke:#8FD3E4;stroke-width:1.6;}
+.admin line{stroke:#DDF1F7;stroke-width:2;stroke-linecap:round;}
+.admin circle.knob{fill:#DBA12C;}
+.admin:hover rect.panel{fill:rgba(143,211,228,.35);stroke:#FFFFFF;}
 a{cursor:pointer;}
 .hot .body{fill:#FFFFFF;stroke:#FFFFFF;stroke-width:3;}
 .hot .halo{fill:rgba(143,211,228,.32);}
@@ -145,6 +152,17 @@ for(const b of D.bodies){
   byId[b.id] = {b, g, tether, x:0, y:0, phase:Math.random()*Math.PI*2};
 }
 const branches = D.branchTo.map(()=>el("line",{class:"branch"},$("lLines")));
+
+// 앱 관리 단추 — 누르면 Streamlit 내 앱 목록(리부트). 상표 로고 대신 제어판 모양 표시.
+if(D.admin){
+  const a = el("a",{href:D.admin.url,target:"_blank",class:"admin"},$("lBodies"));
+  const g = el("g",{transform:`translate(${D.admin.x} ${D.admin.y})`},a);
+  el("title",{},g).textContent = "Streamlit 앱 관리 · 엔진을 고친 뒤 여기서 리부트합니다";
+  el("rect",{class:"panel",x:-22,y:-18,width:44,height:36,rx:7},g);
+  [-8,0,8].forEach((dy,i)=>{ el("line",{x1:-12,y1:dy,x2:12,y2:dy},g); el("circle",{class:"knob",cx:[-5,6,-1][i],cy:dy,r:3},g); });
+  const t = el("text",{class:"lbl",y:36,"font-size":12},g); t.textContent = "APP CONTROL";
+  const s2 = el("text",{class:"sub",y:51},g); s2.textContent = "Streamlit 앱 관리";
+}
 $("lLines").insertBefore(relay, null);
 
 function ringPos(ring, deg){

@@ -467,13 +467,13 @@ def office_page() -> None:
 def system_page() -> None:
     header("STORY ENGINE SYSTEM")
     try:
-        page = build_html(GROUPS, PARTNER, SYSTEM_PROJECT)   # 이 앱이 직접 만든 HTML만 넣습니다
+        page = build_html(GROUPS, PARTNER, SYSTEM_PROJECT, STREAMLIT_ADMIN)   # 이 앱이 직접 만든 HTML만 넣습니다
         if hasattr(st, "iframe"):            # Streamlit 새 방식
             st.iframe(page, height=FRAME_HEIGHT)
         else:                                # 예전 Streamlit 대비
             components.html(page, height=FRAME_HEIGHT)
         st.markdown('<div class="so-hint">행성을 누르면 그 엔진이 열립니다. 행성 위에 마우스를 올리면 전체가 잠시 멈추고 설명이 보입니다. '
-                    '가운데 구체를 누르면 시스템 전체를 다루는 STORY ENGINE SYSTEM 개발실이 열립니다.</div>', unsafe_allow_html=True)
+                    '가운데 구체를 누르면 시스템 전체를 다루는 STORY ENGINE SYSTEM 개발실이, 오른쪽 아래 APP CONTROL을 누르면 Streamlit 앱 관리(리부트)가 열립니다.</div>', unsafe_allow_html=True)
     except Exception as e:
         st.markdown(f'<div class="so-err">성계 그림을 그리지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
 
