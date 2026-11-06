@@ -375,26 +375,98 @@ def meeting_section() -> None:
                     st.error("비밀번호가 맞지 않습니다.")
         return
 
+    jobs = _jobs()
+    running = any(j["status"] == "running" for j in jobs.values())
     with st.form("meeting"):
         direction = st.text_input("소재 발굴 방향 한 줄 (비워 두면 넓게 찾습니다)",
                                   placeholder="예: 베트남의 최근 사회 변화 / 사라지는 직업 / 일본 지방 소도시의 사건")
-        go = st.form_submit_button("소재 발굴부터 회의 시작", type="primary")
-    if go:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        n = st.session_state.get("meeting_no", 0) + 1
+        go = st.form_submit_button("소재 발굴부터 회의 시작", type="primary", disabled=running)
+    if running:
+        st.caption("회의가 진행 중이라 새 회의는 끝난 뒤에 열 수 있습니다.")
+    if go and not running:
+        jid = _start_meeting(api_key, direction)
+        st.session_state["job_id"] = jid
+        st.rerun()
+
+    # 진행 중이거나 가장 최근 회의 (화면을 닫았다 다시 열어도 이어집니다)
+    jid = st.session_state.get("job_id") or (max(jobs, key=lambda k: jobs[k]["started"]) if jobs else None)
+    job = jobs.get(jid) if jid else None
+    if job and job["status"] == "running":
+        _progress_view(jid)
+    elif job and job["status"] == "error":
+        st.error(f"회의 중 문제가 생겼습니다: {job['error']}")
+        with st.expander("진행 기록"):
+            st.code("\n".join(job["log"]), language=None)
+    elif job and job["status"] == "done":
+        st.caption(f"회의 시작 {job['started_label']} · {job['elapsed']} 소요 · 검색 {job['result']['searches']}회")
         try:
-            with st.status("회의를 시작합니다", expanded=True) as box:
-                result = staff.run_meeting(client, direction, no=n, date=datetime.now(KST).strftime("%Y-%m-%d"), progress=box.write)
-                box.update(label=f"회의가 끝났습니다 · 검색 {result['searches']}회", state="complete", expanded=False)
-            st.session_state["meeting_result"], st.session_state["meeting_no"] = result, n
-        except Exception as e:
-            st.error(f"회의 중 문제가 생겼습니다: {type(e).__name__}: {e}")
-    if st.session_state.get("meeting_result"):
-        try:
-            render_meeting(st.session_state["meeting_result"])
+            render_meeting(job["result"])
         except Exception as e:
             st.markdown(f'<div class="so-err">회의 결과를 그리지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
+
+
+# ---------- 회의는 서버가 따로 끝까지 진행합니다 ----------
+@st.cache_resource
+def _jobs() -> dict:
+    """앱이 살아 있는 동안 회의 기록을 보관합니다 (화면 연결과 무관)."""
+    return {}
+
+
+def _log(job: dict, msg: str) -> None:
+    line = f"{datetime.now(KST):%H:%M:%S} {msg}"
+    job["log"].append(line)
+    print(f"[STORY OFFICE] {line}", flush=True)   # Streamlit 로그에도 남김
+
+
+def _start_meeting(api_key: str, direction: str) -> str:
+    import threading
+    import traceback
+    import uuid
+
+    jobs = _jobs()
+    jid = uuid.uuid4().hex[:8]
+    now = datetime.now(KST)
+    job = {"status": "running", "log": [], "result": None, "error": "", "started": now.timestamp(),
+           "started_label": f"{now:%m-%d %H:%M}", "elapsed": "", "direction": direction}
+    jobs[jid] = job
+    for old in sorted(jobs, key=lambda k: jobs[k]["started"])[:-5]:   # 최근 5건만 보관
+        jobs.pop(old, None)
+
+    def work():
+        import anthropic
+        _log(job, f"회의 시작 · 방향: {direction or '자유'}")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            result = staff.run_meeting(client, direction, no=len(jobs), date=now.strftime("%Y-%m-%d"),
+                                       progress=lambda m: _log(job, m))
+            job["result"] = result
+            job["status"] = "done"
+            _log(job, f"회의 끝 · 배정 {result['minutes']['assignment']} · 검색 {result['searches']}회")
+        except Exception as e:
+            job["error"] = f"{type(e).__name__}: {e}"
+            job["status"] = "error"
+            _log(job, "오류 " + job["error"])
+            print(traceback.format_exc(), flush=True)
+        finally:
+            sec = int(datetime.now(KST).timestamp() - job["started"])
+            job["elapsed"] = f"{sec // 60}분 {sec % 60}초"
+
+    threading.Thread(target=work, daemon=True).start()
+    return jid
+
+
+@st.fragment(run_every=3)
+def _progress_view(jid: str) -> None:
+    job = _jobs().get(jid)
+    if not job:
+        return
+    if job["status"] != "running":
+        st.rerun()   # 끝났으면 화면 전체를 다시 그려 결과를 보여줍니다
+    sec = int(datetime.now(KST).timestamp() - job["started"])
+    with st.status(f"회의 진행 중 · {sec // 60}분 {sec % 60}초", expanded=True, state="running"):
+        for line in job["log"]:
+            st.write(line)
+        st.caption("화면을 닫거나 다른 일을 하셔도 회의는 서버에서 끝까지 진행됩니다. 다시 열면 결과가 여기 나옵니다.")
 
 
 def partner_card() -> None:
