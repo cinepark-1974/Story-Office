@@ -86,7 +86,7 @@ GROUPS = [
         "engines": [
             {
                 "name": "Series Engine", "short": "SERIES", "desk": "series", "repo": "Series-Engine",
-                "url": "https://series-engine.streamlit.app/", "orbit": ("outer", 196),
+                "url": "https://seriesengine.streamlit.app/", "orbit": ("outer", 196),
                 "desc": "OTT 시리즈 시즌 1을 시즌 아크부터 회차 대본까지 씁니다.",
             },
             {
