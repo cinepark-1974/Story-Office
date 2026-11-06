@@ -70,7 +70,7 @@ GROUPS = [
             },
             {
                 "name": "Rewrite Engine", "short": "REWRITE", "desk": "rewrite", "repo": "Rewrite-Engine",
-                "url": "https://rewrite-engine.streamlit.app/", "orbit": ("inner", 315),
+                "url": "https://rewriteengine.streamlit.app/", "orbit": ("inner", 315),
                 "desc": "원고를 분석·진단해 커버리지를 내고 처방을 Revise로 넘깁니다.",
             },
             {
