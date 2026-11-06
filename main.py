@@ -15,6 +15,8 @@ import streamlit.components.v1 as components
 
 from engines import DESKS, GITHUB_OWNER, GROUPS, OFFICE_H, OFFICE_W, PARTNER, SYSTEM_PROJECT
 from system_view import FRAME_HEIGHT, build_html
+import staff
+from office_docx import build_meeting_docx
 
 KST = timezone(timedelta(hours=9))
 
@@ -101,6 +103,21 @@ header[data-testid="stHeader"] { background:transparent; }
 .so-seat.below .so-tag { bottom:auto; top:100%; transform:translate(-50%,6px); }
 .so-tag small { display:block; font-weight:400; opacity:.8; font-size:11.5px; }
 .so-seat:hover .so-tag, .so-seat:focus .so-tag { display:block; }
+.so-assign { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;
+  border:2px solid var(--yale); border-radius:6px; padding:14px 18px; margin:16px 0 12px; background:#FFFFFF; }
+.so-alabel { font-size:11.5px; font-weight:700; color:var(--muted); letter-spacing:.04em; margin-bottom:4px; }
+.so-aname { font-size:22px; font-weight:900; color:var(--yale); margin-bottom:4px; }
+.so-paper { background:var(--glacier); border:1px solid var(--line); border-radius:6px; padding:16px 18px; margin-bottom:12px; font-size:13.5px; line-height:1.6; }
+.so-paper p { margin:4px 0 10px; } .so-paper ol, .so-paper ul { margin:2px 0 10px; padding-left:20px; }
+.so-ptitle { font-size:22px; font-weight:900; color:var(--yale); margin:2px 0 6px; }
+.so-chips span { display:inline-block; font-size:11.5px; font-weight:700; color:var(--yale); border:1px solid var(--line);
+  background:#FFFFFF; border-radius:4px; padding:2px 8px; margin:0 6px 8px 0; }
+.so-op { background:#FFFFFF; border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:12px; font-size:13px; line-height:1.55; min-height:150px; }
+.so-op ul { margin:6px 0 0; padding-left:18px; color:var(--ink); }
+.so-opname { font-weight:900; color:var(--yale); font-size:14px; }
+.so-opline { margin-top:4px; font-weight:700; }
+.so-badge { font-size:11px; font-weight:700; border-radius:3px; padding:1px 6px; margin-left:4px; vertical-align:middle; }
+.so-badge.ok { background:#E6F2EA; color:#1F6B3A; } .so-badge.mid { background:#FBF3E2; color:#8A5A00; } .so-badge.no { background:#F8E7E7; color:#8A1F1F; }
 .so-note { font-size:12px; color:var(--muted); margin-top:36px; border-top:1px solid var(--line); padding-top:12px; }
 </style>
 """
@@ -162,20 +179,167 @@ def seat_html(key: str, title: str, sub: str, url: str | None) -> str:
     tag = f'<span class="so-tag">{html.escape(title)}<small>{html.escape(sub)}</small></span>'
     below = " below" if t / OFFICE_H < 0.15 else ""   # 그림 맨 위쪽 자리는 이름표를 아래로
     if url:
-        return f'<a class="so-seat link{below}" style="{style}" href="{html.escape(url)}" target="_blank">{tag}</a>'
+        target = "" if url.startswith("#") else ' target="_blank"'
+        return f'<a class="so-seat link{below}" style="{style}" href="{html.escape(url)}"{target}>{tag}</a>'
     return f'<span class="so-seat{below}" style="{style}" tabindex="0">{tag}</span>'
 
 
+ENGINE_BY_SHORT = {e["short"]: e for e in all_engines}
+
+
 def office_scene() -> str:
+    """직원은 역할로 앉아 있습니다. 엔진은 직원이 쓰는 도구입니다."""
     seats = []
-    for g in GROUPS:
-        for e in g["engines"]:
-            if e.get("desk") in DESKS:
-                sub = g["name"] if e["url"] else f'{g["name"]} · 앱 없음'
-                seats.append(seat_html(e["desk"], e["name"], sub, e["url"]))
+    for key, r in staff.ROLES.items():
+        if r["desk"] not in DESKS:
+            continue
+        tools = [ENGINE_BY_SHORT[t] for t in r["tools"] if t in ENGINE_BY_SHORT]
+        if r["group"] == "round":
+            sub, url = "기획 회의 상설 멤버", "#so-meeting"
+        else:
+            sub = "쓰는 엔진 · " + ", ".join(t["short"] for t in tools) if tools else "기획 회의 참석"
+            url = tools[0]["url"] if len(tools) == 1 else ("#so-tools" if tools else "#so-meeting")
+        seats.append(seat_html(r["desk"], r["title"], sub, url))
+    conv = ENGINE_BY_SHORT.get("CONVERTER")
+    if conv:
+        seats.append(seat_html("converter", conv["name"], "복합기 · 앱 없음" if not conv["url"] else "복합기", conv["url"]))
     seats.append(seat_html("partner", PARTNER["name"], "열기" if PARTNER["url"] else "주소 대기", PARTNER["url"]))
-    seats.append(seat_html("boss", "MR. MOON", "결재석 · 작품 보드에서 열립니다", None))
+    seats.append(seat_html("boss", "MR. MOON", "결재석 · 회의 배정을 결정합니다", "#so-meeting"))
     return ('<div class="so-office"><img src="app/static/office.webp" alt="STORY OFFICE">' + "".join(seats) + "</div>")
+
+
+# ---------- 기획 회의 ----------
+def _secret(name: str) -> str:
+    try:
+        return str(st.secrets.get(name, "") or "")
+    except Exception:  # secrets 파일이 없을 때
+        return ""
+
+
+def _badge(mark: str) -> str:
+    cls = {"통과": "ok", "맞음": "ok", "보완": "mid", "조건부": "mid", "불가": "no", "안 맞음": "no"}.get(mark, "mid")
+    return f'<span class="so-badge {cls}">{html.escape(mark or "")}</span>'
+
+
+def render_meeting(result: dict) -> None:
+    idea, m = result["idea"], result["minutes"]
+    titles = {k: r["title"] for k, r in staff.ROLES.items()}
+
+    # 배정
+    path = staff.ASSIGNMENTS.get(m.get("assignment"), {}).get("path", [])
+    first = ENGINE_BY_SHORT.get(path[0]) if path else None
+    open_btn = (f'<a class="so-go" href="{html.escape(first["url"])}" target="_blank">{html.escape(first["name"])} 열기</a>'
+                if first and first.get("url") else "")
+    st.markdown(clean(f"""
+<div class="so-assign">
+  <div><div class="so-alabel">배정 권고 · 최종 결정은 Mr. MOON</div>
+  <div class="so-aname">{html.escape(m.get("assignment", ""))}</div>
+  <div class="so-desc">{html.escape(m.get("reason", ""))}</div>
+  {f'<div class="so-gnote" style="margin:4px 0 0">다른 길 · {html.escape(m["alternative"])}</div>' if m.get("alternative") else ""}</div>
+  {open_btn}
+</div>"""), unsafe_allow_html=True)
+
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        scenes = "".join(f"<li>{html.escape(x)}</li>" for x in idea.get("scenes", []))
+        refs = " / ".join(html.escape(x) for x in idea.get("references", []))
+        st.markdown(clean(f"""
+<div class="so-paper">
+  <div class="so-alabel">발제 담당 · 아이디어 한 장</div>
+  <div class="so-ptitle">{html.escape(idea.get("title", ""))}</div>
+  <div class="so-chips"><span>{html.escape(idea.get("genre", ""))}</span><span>{html.escape(idea.get("market", ""))}</span><span>{html.escape(idea.get("format", ""))}</span></div>
+  <p><b>{html.escape(idea.get("logline", ""))}</b></p>
+  <p>{html.escape(idea.get("raw_idea", ""))}</p>
+  <div class="so-alabel">핵심 장면</div><ol>{scenes}</ol>
+  <div class="so-alabel">왜 지금인가</div><p>{html.escape(idea.get("why_now", ""))}</p>
+  {f'<div class="so-alabel">레퍼런스</div><p>{refs}</p>' if refs else ""}
+</div>"""), unsafe_allow_html=True)
+    with c2:
+        tasks = "".join(f"<li>{html.escape(x)}</li>" for x in m.get("tasks", []))
+        issues = "".join(f"<li>{html.escape(x)}</li>" for x in m.get("issues", []))
+        st.markdown(clean(f"""
+<div class="so-paper">
+  <div class="so-alabel">회의록 담당 · 결론</div><p>{html.escape(m.get("summary", ""))}</p>
+  {f'<div class="so-alabel">쟁점</div><ul>{issues}</ul>' if issues else ""}
+  <div class="so-alabel">보완 과제 (고치는 것은 작가 몫)</div><ol>{tasks}</ol>
+</div>"""), unsafe_allow_html=True)
+
+    st.markdown('<div class="so-alabel" style="margin:14px 0 6px">참석자 의견</div>', unsafe_allow_html=True)
+    ops = result["opinions"]
+    for i in range(0, len(ops), 3):
+        cols = st.columns(3)
+        for col, o in zip(cols, ops[i:i + 3]):
+            pts = "".join(f"<li>{html.escape(p)}</li>" for p in o.get("points", [])[:3])
+            with col:
+                st.markdown(clean(f"""
+<div class="so-op"><div class="so-opname">{html.escape(titles.get(o["role"], o["role"]))} {_badge(o.get("verdict") or o.get("fit"))}</div>
+<div class="so-opline">{html.escape(o.get("one_line", ""))}</div><ul>{pts}</ul></div>"""), unsafe_allow_html=True)
+
+    ei = m.get("engine_input") or {}
+    hand = "\n".join(f"[{k}]\n{v}\n" for k, v in ei.items())
+    d1, d2 = st.columns(2)
+    with d1:
+        st.download_button("회의 결과 워드 파일 받기", build_meeting_docx(result, titles),
+                           file_name=f"STORY_OFFICE_{idea.get('date', '')}_{idea.get('title', '회의')}.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           use_container_width=True)
+    with d2:
+        if PARTNER.get("url"):
+            st.link_button("Writer's Partner로 가져가기", PARTNER["url"], use_container_width=True)
+    if hand:
+        st.caption("엔진 입력 준비 · 오른쪽 위 복사 버튼으로 복사해 배정된 엔진 첫 화면에 옮기면 됩니다.")
+        st.code(hand, language=None)
+    partner_text = (f"「{idea.get('title')}」 STORY OFFICE 회의 결과입니다. 이 아이디어를 같이 다듬고 싶습니다.\n\n"
+                    f"{staff._idea_sheet(idea)}\n\n[회의 결론] {m.get('summary', '')}\n[배정 권고] {m.get('assignment')}\n"
+                    "[보완 과제]\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(m.get("tasks", []), 1)))
+    with st.expander("Writer's Partner에 붙여 넣을 내용"):
+        st.code(partner_text, language=None)
+
+
+def meeting_section() -> None:
+    st.markdown('<div id="so-meeting" class="so-group">기획 회의</div>'
+                '<div class="so-gnote">버튼을 누를 때만 직원들이 일합니다. 발제 담당이 아이디어 한 장을 쓰고, 참석자가 각자 따로 읽고 의견을 낸 뒤, '
+                '회의록 담당이 어느 책상으로 보낼지 권고합니다. 회의는 아이디어를 고쳐 쓰지 않습니다.</div>', unsafe_allow_html=True)
+    api_key, password = _secret("ANTHROPIC_API_KEY"), _secret("OFFICE_PASSWORD")
+    if not api_key or not password:
+        st.info("회의를 열려면 Streamlit Secrets에 ANTHROPIC_API_KEY와 OFFICE_PASSWORD를 넣어야 합니다. "
+                "버튼 하나가 API 사용량을 쓰므로, 비밀번호 없이는 열리지 않게 해 두었습니다.")
+        return
+    if not st.session_state.get("office_unlocked"):
+        with st.form("unlock"):
+            pw = st.text_input("사무실 비밀번호", type="password")
+            if st.form_submit_button("들어가기"):
+                if pw == password:
+                    st.session_state["office_unlocked"] = True
+                    st.rerun()
+                else:
+                    st.error("비밀번호가 맞지 않습니다.")
+        return
+
+    with st.form("meeting"):
+        direction = st.text_input("발제 방향 한 줄 (비워 두면 발제 담당이 알아서)",
+                                  placeholder="예: 베트남 시장을 겨냥한 호러 / 이번엔 코미디로 / 숏폼 드라마로")
+        scale = st.radio("회의 규모", ["기본 회의 (발제 + 6명)", "전체 회의 (발제 + 12명)"], horizontal=True,
+                         help="기본 회의: 구조·인물·장르·반대 담당 + 해당 포맷 담당 + 국내 시장 담당. "
+                              "전체 회의: 포맷·시장 담당 모두. 전체 회의는 사용량이 두 배쯤 듭니다.")
+        go = st.form_submit_button("발제부터 회의 시작", type="primary")
+    if go:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        n = st.session_state.get("meeting_no", 0) + 1
+        try:
+            with st.status("회의를 시작합니다", expanded=True) as box:
+                result = staff.run_meeting(client, direction, full=scale.startswith("전체"), no=n,
+                                           date=datetime.now(KST).strftime("%Y-%m-%d"), progress=box.write)
+                box.update(label="회의가 끝났습니다", state="complete", expanded=False)
+            st.session_state["meeting_result"], st.session_state["meeting_no"] = result, n
+        except Exception as e:
+            st.error(f"회의 중 문제가 생겼습니다: {type(e).__name__}: {e}")
+    if st.session_state.get("meeting_result"):
+        try:
+            render_meeting(st.session_state["meeting_result"])
+        except Exception as e:
+            st.markdown(f'<div class="so-err">회의 결과를 그리지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
 
 
 def partner_card() -> None:
@@ -229,11 +393,18 @@ def engine_cards() -> None:
 def office_page() -> None:
     header("STORY OFFICE")
     try:
-        st.markdown(office_scene() + '<div class="so-hint">직원에게 마우스를 올리면 맡은 엔진이 보이고, 누르면 열립니다. '
-                    '휴대폰에서는 아래 카드를 쓰시면 편합니다.</div>', unsafe_allow_html=True)
+        st.markdown(office_scene() + '<div class="so-hint">직원에게 마우스를 올리면 역할과 쓰는 엔진이 보입니다. '
+                    '원형 테이블 사람들을 누르면 기획 회의로, 단독 책상 사람들을 누르면 그 엔진으로 갑니다.</div>', unsafe_allow_html=True)
     except Exception as e:  # 그림이 깨져도 아래 카드는 그대로 보입니다
         st.markdown(f'<div class="so-err">사무실 그림을 그리지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
+    try:
+        meeting_section()
+    except Exception as e:
+        st.markdown(f'<div class="so-err">기획 회의를 열지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
     partner_card()
+    st.markdown('<div id="so-tools" class="so-group" style="margin-top:40px">도구함</div>'
+                '<div class="so-gnote">직원들이 쓰는 엔진입니다. 열기는 엔진 앱, 개발실은 그 엔진을 고치는 Claude 프로젝트입니다.</div>',
+                unsafe_allow_html=True)
     engine_cards()
 
 
