@@ -98,23 +98,19 @@ def _idea_page(doc, idea: dict) -> None:
     _section(doc, "왜 지금인가")
     _para(doc, idea["why_now"], size=10, space_after=8)
 
-    refs = idea.get("references") or []
-    if refs:
-        _section(doc, "레퍼런스")
-        _para(doc, "  /  ".join(refs), size=9.5, space_after=6)
-
-    srcs = idea.get("sources") or []
-    if srcs:
-        _para(doc, "근거: " + "  |  ".join(srcs), size=7.5, color=MUTED, space_after=2)
+    mats = idea.get("material_ids") or []
+    if mats:
+        _para(doc, "출발 소재: " + ", ".join(mats) + "  (출처는 회의록 끝)", size=7.5, color=MUTED, space_after=2)
 
     _para(doc, "발제 담당 작성  ·  검토 Mr. MOON", size=7.5, color=MUTED, space_after=0, align=WD_ALIGN_PARAGRAPH.RIGHT)
 
 
 def _minutes_page(doc, result: dict, titles: dict) -> None:
     idea, m = result["idea"], result["minutes"]
+    v, fmt = m["verdict"], m["format"]
     head = _para(doc, size=8.5, space_after=2)
     _font(head.add_run("BLUE JEANS PICTURES  ·  STORY OFFICE 기획 회의록"), 8.5, True, MUTED)
-    _font(head.add_run(f"     {idea.get('date', '')}  ·  {'전체 회의' if result.get('full') else '기본 회의'}"), 8.5, False, MUTED)
+    _font(head.add_run(f"     {idea.get('date', '')}  ·  검색 {result.get('searches', 0)}회"), 8.5, False, MUTED)
     t = _para(doc, f"「{idea['title']}」 회의 결과", size=18, bold=True, color=YALE, space_after=6)
     _rule(t)
 
@@ -124,31 +120,33 @@ def _minutes_page(doc, result: dict, titles: dict) -> None:
     p = cell.paragraphs[0]
     _font(p.add_run("배정 권고  "), 9, True, MUTED)
     _font(p.add_run(m.get("assignment", "")), 13, True, YALE)
+    _font(p.add_run(f"   {v['verdict']}"), 11, True, GOLD)
     if m.get("reason"):
         _font(cell.add_paragraph().add_run(m["reason"]), 9.5)
-    if m.get("alternative"):
-        _font(cell.add_paragraph().add_run("다른 길: " + m["alternative"]), 9, False, MUTED)
-    _para(doc, "최종 결정은 Mr. MOON. 회의는 아이디어를 고쳐 쓰지 않습니다.", size=7.5, color=MUTED, space_after=8)
+    hook = " · ".join(f"{k} {n}" for k, n in v["hook"].items())
+    ranked = " · ".join(f"{k} {n}" for k, n in fmt["ranked"][:3])
+    _font(cell.add_paragraph().add_run(
+        f"Hook {v['hook_total']}/50 ({hook})  ·  시장성 별 {v['stars'] if v['stars'] is not None else '미정'}  ·  "
+        f"치명적 유사작 {'있음' if v['fatal'] else '없음'}  ·  포맷 확신도 {fmt['level']} ({ranked})"), 8, False, MUTED)
+    _para(doc, "판정은 Idea Engine 규칙(GO: Hook 35 이상·시장성 3 이상·치명적 유사작 없음 / NOGO: Hook 25 미만·치명적 유사작·시장 부적합). "
+               "최종 결정은 Mr. MOON. 회의는 아이디어를 고쳐 쓰지 않습니다.", size=7, color=MUTED, space_after=6)
 
     _section(doc, "회의 결론")
-    _para(doc, m.get("summary", ""), size=10, space_after=6)
+    _para(doc, m.get("summary", ""), size=9.5, space_after=4)
 
-    _section(doc, "참석자 의견")
+    _section(doc, "판단 담당 의견  (S번호 = 실제 검색 문서, 인용 = 아이디어 문장, 근거 없는 지적은 싣지 않음)")
     for o in result["opinions"]:
-        p = _para(doc, size=9.5, space_after=0)
-        p.paragraph_format.space_before = Pt(4)
-        _font(p.add_run(f"{titles.get(o['role'], o['role'])}  "), 9.5, True, YALE)
-        _font(p.add_run(f"[{o.get('verdict') or o.get('fit') or ''}]  "), 9.5, True, GOLD)
-        _font(p.add_run(o.get("one_line", "")), 9.5)
-        pts = o.get("points", [])[:3]
+        p = _para(doc, size=9, space_after=0)
+        p.paragraph_format.space_before = Pt(3)
+        _font(p.add_run(f"{titles.get(o['role'], o['role'])}  "), 9, True, YALE)
+        mark = "판정 제외(검색 안 함)" if o.get("excluded") else (o.get("verdict") or o.get("fit") or "")
+        _font(p.add_run(f"[{mark}]  "), 9, True, GOLD)
+        _font(p.add_run(o.get("one_line", "")), 9)
+        pts = [f"{x['text']} ({x['ref'] if x['status'] == '확인됨' else '인용'})" for x in o.get("points", []) if x["status"] != "근거 없음"]
         if pts:
-            q = _para(doc, "  ·  ".join(pts), size=8.5, color=MUTED, space_after=0)
-            q.paragraph_format.line_spacing = 1.15
+            q = _para(doc, "  ·  ".join(pts), size=8, color=MUTED, space_after=0)
+            q.paragraph_format.line_spacing = 1.1
     _para(doc, space_after=2)
-
-    if m.get("issues"):
-        _section(doc, "쟁점")
-        _para(doc, "  ·  ".join(m["issues"]), size=9.5, space_after=6)
 
     _section(doc, "보완 과제")
     for i, x in enumerate(m.get("tasks", [])[:3], 1):
@@ -160,11 +158,21 @@ def _minutes_page(doc, result: dict, titles: dict) -> None:
     ei = m.get("engine_input") or {}
     if ei:
         _section(doc, "엔진 입력 준비")
-        for k, v in ei.items():
+        for k, val in ei.items():
             p = _para(doc, size=8.5, space_after=0)
-            p.paragraph_format.line_spacing = 1.15
+            p.paragraph_format.line_spacing = 1.1
             _font(p.add_run(f"{k}  "), 8.5, True, MUTED)
-            _font(p.add_run(str(v)), 8.5)
+            _font(p.add_run(str(val)), 8.5)
+        _para(doc, space_after=2)
+
+    srcs = result.get("sources") or []
+    used = {x["ref"] for o in result["opinions"] for x in o.get("points", []) if x["status"] == "확인됨"} | set(idea.get("material_ids", []))
+    rows = [s for s in srcs if s["id"] in used]
+    if rows:
+        _section(doc, "출처")
+        for s_ in rows:
+            q = _para(doc, f"{s_['id']}  {s_['title']}  {s_['url']}", size=7, color=MUTED, space_after=0)
+            q.paragraph_format.line_spacing = 1.0
 
 
 def build_meeting_docx(result: dict, titles: dict) -> bytes:

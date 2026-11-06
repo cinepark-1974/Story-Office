@@ -118,6 +118,16 @@ header[data-testid="stHeader"] { background:transparent; }
 .so-opline { margin-top:4px; font-weight:700; }
 .so-badge { font-size:11px; font-weight:700; border-radius:3px; padding:1px 6px; margin-left:4px; vertical-align:middle; }
 .so-badge.ok { background:#E6F2EA; color:#1F6B3A; } .so-badge.mid { background:#FBF3E2; color:#8A5A00; } .so-badge.no { background:#F8E7E7; color:#8A1F1F; }
+.so-src { display:inline-block; font-size:10.5px; font-weight:700; border-radius:3px; padding:0 5px; margin-left:2px; text-decoration:none !important; vertical-align:middle; }
+.so-src.ok { background:#E8F0F5; color:var(--yale) !important; border:1px solid #C8D6DD; }
+.so-src.q { background:#F7FBFC; color:var(--muted); border:1px solid #C8D6DD; }
+.so-src.no { background:#F3F3F3; color:#9AA5AD; border:1px dashed #C8D6DD; }
+.so-weak { color:#9AA5AD; }
+.so-off { opacity:.55; } .so-excl { font-size:11.5px; font-weight:700; color:#8A1F1F; margin-top:2px; }
+.so-verdict { font-size:12px; font-weight:900; border-radius:4px; padding:2px 8px; vertical-align:middle; margin-left:6px; }
+.so-verdict.go { background:#E6F2EA; color:#1F6B3A; } .so-verdict.conditional { background:#FBF3E2; color:#8A5A00; } .so-verdict.nogo { background:#F8E7E7; color:#8A1F1F; }
+.so-cand { border-left:3px solid var(--line); padding:6px 10px; margin:6px 0; font-size:13px; line-height:1.55; }
+.so-cand.so-chosen { border-left-color:var(--gold); background:#FFFBF2; }
 .so-note { font-size:12px; color:var(--muted); margin-top:36px; border-top:1px solid var(--line); padding-top:12px; }
 </style>
 """
@@ -194,11 +204,10 @@ def office_scene() -> str:
         if r["desk"] not in DESKS:
             continue
         tools = [ENGINE_BY_SHORT[t] for t in r["tools"] if t in ENGINE_BY_SHORT]
-        if r["group"] == "round":
-            sub, url = "기획 회의 상설 멤버", "#so-meeting"
-        else:
-            sub = "쓰는 엔진 · " + ", ".join(t["short"] for t in tools) if tools else "기획 회의 참석"
-            url = tools[0]["url"] if len(tools) == 1 else ("#so-tools" if tools else "#so-meeting")
+        group_name = {"round": "원형 테이블 · 작품 판단", "evidence": "근거팀 · 검색 필수", "judge": "판정 데스크",
+                      "special": "특수 포맷 · 해당될 때만 회의 참석"}[r["group"]]
+        sub = group_name + (" · 쓰는 엔진 " + ", ".join(t["short"] for t in tools) if tools else "")
+        url = tools[0]["url"] if (len(tools) == 1 and r["group"] == "special") else "#so-meeting"
         seats.append(seat_html(r["desk"], r["title"], sub, url))
     conv = ENGINE_BY_SHORT.get("CONVERTER")
     if conv:
@@ -221,62 +230,111 @@ def _badge(mark: str) -> str:
     return f'<span class="so-badge {cls}">{html.escape(mark or "")}</span>'
 
 
+def _pt_html(p: dict, src: dict) -> str:
+    """지적 하나와 그 근거 표시."""
+    if p["status"] == "확인됨" and p["ref"] in src:
+        s = src[p["ref"]]
+        tag = f'<a class="so-src ok" href="{html.escape(s["url"])}" target="_blank" title="{html.escape(s["title"])}">{p["ref"]}</a>'
+    elif p["status"] == "인용":
+        tag = f'<span class="so-src q" title="{html.escape(p["ref"])}">인용</span>'
+    else:
+        tag = '<span class="so-src no">근거 없음</span>'
+    cls = ' class="so-weak"' if p["status"] == "근거 없음" else ""
+    return f"<li{cls}>{html.escape(p['text'])} {tag}</li>"
+
+
 def render_meeting(result: dict) -> None:
     idea, m = result["idea"], result["minutes"]
+    v, fmt = m["verdict"], m["format"]
     titles = {k: r["title"] for k, r in staff.ROLES.items()}
+    src = {s["id"]: s for s in result["sources"]}
 
-    # 배정
-    path = staff.ASSIGNMENTS.get(m.get("assignment"), {}).get("path", [])
+    # 판정과 배정
+    path = staff.ASSIGNMENTS.get(m.get("assignment"), [])
     first = ENGINE_BY_SHORT.get(path[0]) if path else None
     open_btn = (f'<a class="so-go" href="{html.escape(first["url"])}" target="_blank">{html.escape(first["name"])} 열기</a>'
                 if first and first.get("url") else "")
+    hook = " · ".join(f"{k} {n}" for k, n in v["hook"].items())
+    ranked = " · ".join(f"{k} {n}" for k, n in fmt["ranked"][:3])
     st.markdown(clean(f"""
 <div class="so-assign">
-  <div><div class="so-alabel">배정 권고 · 최종 결정은 Mr. MOON</div>
-  <div class="so-aname">{html.escape(m.get("assignment", ""))}</div>
-  <div class="so-desc">{html.escape(m.get("reason", ""))}</div>
-  {f'<div class="so-gnote" style="margin:4px 0 0">다른 길 · {html.escape(m["alternative"])}</div>' if m.get("alternative") else ""}</div>
+  <div style="flex:1;min-width:260px">
+    <div class="so-alabel">편성 담당 · 배정 권고 · 최종 결정은 Mr. MOON</div>
+    <div class="so-aname">{html.escape(m["assignment"])} <span class="so-verdict {v["verdict"].lower()}">{v["verdict"]}</span></div>
+    <div class="so-desc">{html.escape(m.get("reason", ""))}</div>
+    <div class="so-gnote" style="margin:6px 0 0">Hook {v["hook_total"]}/50 ({html.escape(hook)}) · 시장성 별 {v["stars"] if v["stars"] is not None else "미정"} ·
+    치명적 유사작 {"있음" if v["fatal"] else "없음"} · 포맷 확신도 {fmt["level"]} ({html.escape(ranked)})</div>
+  </div>
   {open_btn}
 </div>"""), unsafe_allow_html=True)
+
+    # 소재
+    sc = result["scouting"]
+    rows = []
+    for c in sc["candidates"]:
+        chosen = " so-chosen" if set(c["ids"]) & set(idea.get("material_ids", [])) else ""
+        links = " ".join(f'<a class="so-src ok" href="{html.escape(src[i]["url"])}" target="_blank">{i}</a>' for i in c["ids"] if i in src)
+        rows.append(f'<div class="so-cand{chosen}"><b>{html.escape(c["name"])}</b> <span class="so-gnote">{html.escape(c.get("where_when", ""))}</span> {links}'
+                    f'<div>{html.escape(c["fact"])}</div><div class="so-gnote" style="margin:2px 0 0">결핍·상실: {html.escape(c.get("lack_or_loss", ""))}</div></div>')
+    with st.expander(f"소재 발굴 담당 · 현실 소재 후보 {len(sc['candidates'])}개 (검색 {sc['searches']}회)", expanded=False):
+        st.markdown("".join(rows), unsafe_allow_html=True)
+        if sc.get("dropped"):
+            st.caption(f"실제 검색 주소가 없는 후보 {sc['dropped']}개는 버렸습니다.")
 
     c1, c2 = st.columns([3, 2])
     with c1:
         scenes = "".join(f"<li>{html.escape(x)}</li>" for x in idea.get("scenes", []))
-        refs = " / ".join(html.escape(x) for x in idea.get("references", []))
+        mats = " ".join(f'<a class="so-src ok" href="{html.escape(src[i]["url"])}" target="_blank">{i}</a>' for i in idea.get("material_ids", []) if i in src)
         st.markdown(clean(f"""
 <div class="so-paper">
-  <div class="so-alabel">발제 담당 · 아이디어 한 장</div>
+  <div class="so-alabel">발제 담당 · 아이디어 한 장 {f"· 출발 소재 {mats}" if mats else ""}</div>
   <div class="so-ptitle">{html.escape(idea.get("title", ""))}</div>
   <div class="so-chips"><span>{html.escape(idea.get("genre", ""))}</span><span>{html.escape(idea.get("market", ""))}</span><span>{html.escape(idea.get("format", ""))}</span></div>
   <p><b>{html.escape(idea.get("logline", ""))}</b></p>
   <p>{html.escape(idea.get("raw_idea", ""))}</p>
   <div class="so-alabel">핵심 장면</div><ol>{scenes}</ol>
   <div class="so-alabel">왜 지금인가</div><p>{html.escape(idea.get("why_now", ""))}</p>
-  {f'<div class="so-alabel">레퍼런스</div><p>{refs}</p>' if refs else ""}
 </div>"""), unsafe_allow_html=True)
     with c2:
         tasks = "".join(f"<li>{html.escape(x)}</li>" for x in m.get("tasks", []))
         issues = "".join(f"<li>{html.escape(x)}</li>" for x in m.get("issues", []))
         st.markdown(clean(f"""
 <div class="so-paper">
-  <div class="so-alabel">회의록 담당 · 결론</div><p>{html.escape(m.get("summary", ""))}</p>
+  <div class="so-alabel">편성 담당 · 회의 결론</div><p>{html.escape(m.get("summary", ""))}</p>
   {f'<div class="so-alabel">쟁점</div><ul>{issues}</ul>' if issues else ""}
   <div class="so-alabel">보완 과제 (고치는 것은 작가 몫)</div><ol>{tasks}</ol>
+  <div class="so-alabel">포맷 판단 근거</div><p>{html.escape(m.get("format_basis", ""))}</p>
 </div>"""), unsafe_allow_html=True)
 
-    st.markdown('<div class="so-alabel" style="margin:14px 0 6px">참석자 의견</div>', unsafe_allow_html=True)
+    st.markdown('<div class="so-alabel" style="margin:14px 0 6px">판단 담당 의견 · 근거 표시: '
+                '<span class="so-src ok">S번호</span> 실제 검색 문서 · <span class="so-src q">인용</span> 아이디어 문장 · '
+                '<span class="so-src no">근거 없음</span> 판정에 쓰지 않음</div>', unsafe_allow_html=True)
     ops = result["opinions"]
     for i in range(0, len(ops), 3):
         cols = st.columns(3)
         for col, o in zip(cols, ops[i:i + 3]):
-            pts = "".join(f"<li>{html.escape(p)}</li>" for p in o.get("points", [])[:3])
+            pts = "".join(_pt_html(p, src) for p in o.get("points", []))
+            und = o.get("undecided") or []
+            extra = ""
+            if o["role"] == "original" and o.get("similar"):
+                extra = "<div class='so-gnote' style='margin:6px 0 0'>유사작: " + ", ".join(
+                    f'{html.escape(x.get("title", ""))} <a class="so-src ok" href="{html.escape(src[x["ref"]]["url"])}" target="_blank">{x["ref"]}</a>'
+                    for x in o["similar"] if x.get("ref") in src) + "</div>"
+            note = ('<div class="so-excl">검색하지 않아 판정에서 제외</div>' if o.get("excluded") else "")
             with col:
                 st.markdown(clean(f"""
-<div class="so-op"><div class="so-opname">{html.escape(titles.get(o["role"], o["role"]))} {_badge(o.get("verdict") or o.get("fit"))}</div>
-<div class="so-opline">{html.escape(o.get("one_line", ""))}</div><ul>{pts}</ul></div>"""), unsafe_allow_html=True)
+<div class="so-op{' so-off' if o.get('excluded') else ''}"><div class="so-opname">{html.escape(titles.get(o["role"], o["role"]))} {_badge(o.get("verdict") or o.get("fit"))}
+<span class="so-gnote" style="margin:0 0 0 4px">검색 {o.get("searches", 0)}회</span></div>{note}
+<div class="so-opline">{html.escape(o.get("one_line", ""))}</div><ul>{pts}</ul>
+{f'<div class="so-gnote" style="margin:4px 0 0">미정: {html.escape(", ".join(und))}</div>' if und else ""}{extra}</div>"""), unsafe_allow_html=True)
+
+    with st.expander(f"출처 장부 · 실제로 검색된 문서 {len(result['sources'])}건 (검색 {result['searches']}회)"):
+        st.markdown("".join(f'<div class="so-gnote" style="margin:2px 0">{s["id"]} · {html.escape(s["found_by"])} · '
+                            f'<a href="{html.escape(s["url"])}" target="_blank">{html.escape(s["title"] or s["url"])}</a> {html.escape(s.get("page_age") or "")}</div>'
+                            for s in result["sources"]), unsafe_allow_html=True)
 
     ei = m.get("engine_input") or {}
-    hand = "\n".join(f"[{k}]\n{v}\n" for k, v in ei.items())
+    hand = "\n".join(f"[{k}]\n{v_}\n" for k, v_ in ei.items())
     d1, d2 = st.columns(2)
     with d1:
         st.download_button("회의 결과 워드 파일 받기", build_meeting_docx(result, titles),
@@ -290,7 +348,7 @@ def render_meeting(result: dict) -> None:
         st.caption("엔진 입력 준비 · 오른쪽 위 복사 버튼으로 복사해 배정된 엔진 첫 화면에 옮기면 됩니다.")
         st.code(hand, language=None)
     partner_text = (f"「{idea.get('title')}」 STORY OFFICE 회의 결과입니다. 이 아이디어를 같이 다듬고 싶습니다.\n\n"
-                    f"{staff._idea_sheet(idea)}\n\n[회의 결론] {m.get('summary', '')}\n[배정 권고] {m.get('assignment')}\n"
+                    f"{staff.idea_sheet(idea)}\n\n[판정] {v['verdict']}  [배정 권고] {m['assignment']}\n[회의 결론] {m.get('summary', '')}\n"
                     "[보완 과제]\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(m.get("tasks", []), 1)))
     with st.expander("Writer's Partner에 붙여 넣을 내용"):
         st.code(partner_text, language=None)
@@ -298,8 +356,9 @@ def render_meeting(result: dict) -> None:
 
 def meeting_section() -> None:
     st.markdown('<div id="so-meeting" class="so-group">기획 회의</div>'
-                '<div class="so-gnote">버튼을 누를 때만 직원들이 일합니다. 발제 담당이 아이디어 한 장을 쓰고, 참석자가 각자 따로 읽고 의견을 낸 뒤, '
-                '회의록 담당이 어느 책상으로 보낼지 권고합니다. 회의는 아이디어를 고쳐 쓰지 않습니다.</div>', unsafe_allow_html=True)
+                '<div class="so-gnote">버튼을 누를 때만 직원들이 일합니다. 소재 발굴 담당이 전 세계 현실 소재를 찾고, 발제 담당이 아이디어 한 장을 쓰고, '
+                '판단 담당 7명이 엔진 기준으로 각자 검토한 뒤, 편성 담당이 Idea Engine 판정 규칙으로 배정을 권고합니다. '
+                '모든 지적에는 근거(실제 검색 문서 또는 아이디어 인용)가 붙고, 근거 없는 말은 판정에 쓰지 않습니다.</div>', unsafe_allow_html=True)
     api_key, password = _secret("ANTHROPIC_API_KEY"), _secret("OFFICE_PASSWORD")
     if not api_key or not password:
         st.info("회의를 열려면 Streamlit Secrets에 ANTHROPIC_API_KEY와 OFFICE_PASSWORD를 넣어야 합니다. "
@@ -317,21 +376,17 @@ def meeting_section() -> None:
         return
 
     with st.form("meeting"):
-        direction = st.text_input("발제 방향 한 줄 (비워 두면 발제 담당이 알아서)",
-                                  placeholder="예: 베트남 시장을 겨냥한 호러 / 이번엔 코미디로 / 숏폼 드라마로")
-        scale = st.radio("회의 규모", ["기본 회의 (발제 + 6명)", "전체 회의 (발제 + 12명)"], horizontal=True,
-                         help="기본 회의: 구조·인물·장르·반대 담당 + 해당 포맷 담당 + 국내 시장 담당. "
-                              "전체 회의: 포맷·시장 담당 모두. 전체 회의는 사용량이 두 배쯤 듭니다.")
-        go = st.form_submit_button("발제부터 회의 시작", type="primary")
+        direction = st.text_input("소재 발굴 방향 한 줄 (비워 두면 넓게 찾습니다)",
+                                  placeholder="예: 베트남의 최근 사회 변화 / 사라지는 직업 / 일본 지방 소도시의 사건")
+        go = st.form_submit_button("소재 발굴부터 회의 시작", type="primary")
     if go:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         n = st.session_state.get("meeting_no", 0) + 1
         try:
             with st.status("회의를 시작합니다", expanded=True) as box:
-                result = staff.run_meeting(client, direction, full=scale.startswith("전체"), no=n,
-                                           date=datetime.now(KST).strftime("%Y-%m-%d"), progress=box.write)
-                box.update(label="회의가 끝났습니다", state="complete", expanded=False)
+                result = staff.run_meeting(client, direction, no=n, date=datetime.now(KST).strftime("%Y-%m-%d"), progress=box.write)
+                box.update(label=f"회의가 끝났습니다 · 검색 {result['searches']}회", state="complete", expanded=False)
             st.session_state["meeting_result"], st.session_state["meeting_no"] = result, n
         except Exception as e:
             st.error(f"회의 중 문제가 생겼습니다: {type(e).__name__}: {e}")
