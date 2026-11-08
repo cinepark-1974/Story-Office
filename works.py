@@ -7,6 +7,7 @@ storyoffice/works.json 한 파일에 보관합니다.
 단계 코드는 engines.py 의 short 값(IDEA, CREATOR …)과 같습니다.
 """
 
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -36,9 +37,15 @@ def _now() -> str:
     return f"{datetime.now(KST):%Y-%m-%d %H:%M}"
 
 
+def norm(title: str) -> str:
+    """Mac에서 온 한글(자모 분리, NFD)도 같은 제목으로 봅니다."""
+    return unicodedata.normalize("NFC", str(title or "")).strip()
+
+
 def new_work(title: str, fmt: str, genre: str, stages: list[str]) -> dict:
+    title = norm(title)
     stages = [s for s in STAGE_ORDER if s in stages]   # 순서를 바로잡습니다
-    return {"id": uuid.uuid4().hex[:8], "title": title.strip(), "format": fmt, "genre": genre.strip(),
+    return {"id": uuid.uuid4().hex[:8], "title": title, "format": fmt, "genre": genre.strip(),
             "stages": stages, "state": {s: "대기" for s in stages}, "note": {s: "" for s in stages},
             "log": [{"date": _now(), "stage": "", "state": "", "note": "등록"}],
             "created": _now(), "updated": _now(), "archived": False}
@@ -73,9 +80,9 @@ def merge(all_works: list[dict], payload: list[dict]) -> tuple[list[str], list[s
                     "stages": {"IDEA": "완료", "WRITER": "진행"}, "notes": {"WRITER": "v2.1"}}
     """
     added, updated = [], []
-    by_title = {w["title"].replace(" ", ""): w for w in all_works}
+    by_title = {norm(w["title"]).replace(" ", ""): w for w in all_works}
     for row in payload:
-        title = str(row.get("title", "")).strip()
+        title = norm(row.get("title", ""))
         stages = {k: v for k, v in (row.get("stages") or {}).items() if k in STAGE_LABEL and v in STATES}
         if not title or not stages:
             continue
