@@ -10,6 +10,13 @@ Claude가 드라이브 폴더를 정리할 때 쓰는 도구입니다. 앱은 �
   Rewrite    engine_version 이 "Rewrite Engine" 으로 시작 → chris_analysis 점수와 판정
   Revise     schema_version 이 "revise_verify" 로 시작 → round_n, overall_score (검증 보고서라 '진행'으로 둠)
   번역       _meta.stage_progress + session.stage_N_result → 본문 글자로 영어·일본어 구분
+아래는 샘플 대신 각 엔진의 저장 코드(GitHub)에서 확인한 형식입니다.
+  Series     _meta.engine == "Series Engine" → 써진 회차 / 전체 회차
+  Novel      _novel_engine 이 있음 → 제목만 (진행 정도는 저장본에 표시가 없음)
+  WebNovel   _engine_version + concept_card → 써진 화 수
+  Wuxia      version == "wuxia-1.0" + concept_card → 써진 화 수
+  FMV        project + branches + scenes → 씬 수
+  Shortform  JSON 저장이 없어 DOCX 파일 이름으로만 판단
 """
 
 import json
@@ -17,7 +24,8 @@ import re
 import sys
 import unicodedata
 
-ORDER = ["IDEA", "CREATOR", "WRITER", "REWRITE", "REVISE", "ENGLISH", "JAPANESE"]
+ORDER = ["IDEA", "CREATOR", "WRITER", "SERIES", "WEBNOVEL", "NOVEL", "WUXIA", "SHORTFORM", "FMV",
+         "REWRITE", "REVISE", "ENGLISH", "JAPANESE"]
 
 
 def _title(t: str) -> str:
@@ -76,6 +84,23 @@ def _read(d: dict) -> dict | None:
         lang = "JAPANESE" if meta.get("engine") == "Japanese-Translator" else _lang(d["session"])
         return {"title": _title(meta.get("title", "")), "stage": lang, "state": "완료" if t and n >= t else "진행",
                 "note": f"{n}/{t}단계", "date": str(meta.get("saved_at", ""))[:10]}
+    if meta.get("engine") == "Series Engine":
+        n, t = int(meta.get("beats_written") or 0), int(meta.get("num_episodes") or 0)
+        return {"title": meta.get("project_title", ""), "stage": "SERIES", "state": "완료" if t and n >= t else "진행",
+                "note": f"{n}/{t}화" if t else "", "date": str(meta.get("saved_at", ""))[:10], "format": "OTT 시리즈"}
+    if isinstance(d.get("_novel_engine"), dict):
+        m = d["_novel_engine"]
+        return {"title": m.get("title", ""), "stage": "NOVEL", "state": "진행", "note": "저장본",
+                "date": str(m.get("saved_at", ""))[:10], "format": "장편소설"}
+    if isinstance(d.get("concept_card"), dict) and ("_engine_version" in d or d.get("version") == "wuxia-1.0"):
+        wuxia = d.get("version") == "wuxia-1.0"
+        eps = len(d.get("episodes_19") or {}) or len(d.get("episodes_15") or {})
+        return {"title": d["concept_card"].get("title", ""), "stage": "WUXIA" if wuxia else "WEBNOVEL", "state": "진행",
+                "note": f"{eps}화 원고" if eps else "기획", "date": str(d.get("saved_at") or d.get("_saved_at") or "")[:10],
+                "format": "무협" if wuxia else "웹소설"}
+    if isinstance(d.get("project"), dict) and "branches" in d and "scenes" in d:
+        return {"title": d["project"].get("title", ""), "stage": "FMV", "state": "진행",
+                "note": f"씬 {len(d.get('scenes') or [])}개", "date": "", "format": "인터랙티브(FMV)"}
     return None
 
 
@@ -85,8 +110,9 @@ def build(records: list[dict]) -> dict:
     for r in records:
         key = r["title"].replace(" ", "")
         w = works.setdefault(key, {"title": r["title"], "format": "", "genre": "", "stages": {}, "notes": {}, "_date": {}})
-        if r.get("format") == "영화":
-            w["format"] = "장편 영화"
+        fmt = {"영화": "장편 영화"}.get(r.get("format", ""), r.get("format", ""))
+        if fmt and not w["format"]:
+            w["format"] = fmt
         if r.get("genre") and not w["genre"]:
             w["genre"] = r["genre"]
         if r["date"] >= w["_date"].get(r["stage"], ""):
