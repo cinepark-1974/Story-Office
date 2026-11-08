@@ -628,6 +628,24 @@ def works_board() -> None:
                 all_works.append(works.new_work(title, fmt, genre, stages))
                 st.session_state["work_new_reset"] = True
                 save(f"{title.strip()} 등록")
+    with st.expander("한 번에 등록 · Claude가 정리한 목록 붙여넣기"):
+        st.caption("드라이브 폴더를 Claude가 정리해 준 글을 그대로 붙여 넣으십시오. 제목이 같은 작품은 단계만 고치고, 없는 작품은 새로 넣습니다.")
+        if st.session_state.pop("work_bulk_reset", False):
+            st.session_state["wbulk"] = ""
+        raw = st.text_area("붙여 넣을 글", key="wbulk", height=160, label_visibility="collapsed")
+        if st.button("한 번에 등록", key="wbulk_go", type="primary"):
+            try:
+                payload = staff._json(raw)
+                rows = payload.get("works", []) if isinstance(payload, dict) else []
+                added, updated = works.merge(all_works, rows)
+            except Exception as e:
+                st.error(f"글을 읽지 못했습니다. Claude가 준 글을 처음부터 끝까지 그대로 붙여 넣으셨는지 확인해 주십시오. ({e})")
+            else:
+                if not added and not updated:
+                    st.warning("등록할 작품을 찾지 못했습니다.")
+                else:
+                    st.session_state["work_bulk_reset"] = True
+                    save(f"새로 {len(added)}편 · 고침 {len(updated)}편")
     gone = [w for w in all_works if w.get("archived")]
     if gone:
         with st.expander(f"내린 작품 ({len(gone)}편)"):

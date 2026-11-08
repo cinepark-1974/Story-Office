@@ -64,3 +64,39 @@ def current(work: dict) -> tuple[str, str]:
         if work["state"].get(s) != "완료":
             return s, "대기"
     return "", "완성"
+
+
+def merge(all_works: list[dict], payload: list[dict]) -> tuple[list[str], list[str]]:
+    """Claude가 정리한 목록을 현황판에 합칩니다. 제목이 같으면 고치고, 없으면 새로 넣습니다.
+
+    payload 한 줄: {"title": "...", "format": "장편 영화", "genre": "...",
+                    "stages": {"IDEA": "완료", "WRITER": "진행"}, "notes": {"WRITER": "v2.1"}}
+    """
+    added, updated = [], []
+    by_title = {w["title"].replace(" ", ""): w for w in all_works}
+    for row in payload:
+        title = str(row.get("title", "")).strip()
+        stages = {k: v for k, v in (row.get("stages") or {}).items() if k in STAGE_LABEL and v in STATES}
+        if not title or not stages:
+            continue
+        notes = row.get("notes") or {}
+        w = by_title.get(title.replace(" ", ""))
+        if w is None:
+            fmt = row.get("format") if row.get("format") in FORMATS else "장편 영화"
+            w = new_work(title, fmt, str(row.get("genre", "")), FORMATS[fmt] + list(stages))   # 포맷 기본 단계 + 정리된 단계
+            all_works.append(w)
+            by_title[title.replace(" ", "")] = w
+            added.append(title)
+        else:
+            new = [s for s in stages if s not in w["stages"]]
+            if new:   # 정리된 단계가 작품에 없으면 순서대로 끼워 넣습니다
+                w["stages"] = [s for s in STAGE_ORDER if s in w["stages"] or s in new]
+                for s in new:
+                    w["state"][s], w["note"][s] = "대기", ""
+            w["archived"] = False
+            updated.append(title)
+        for s, state in stages.items():
+            note = str(notes.get(s, "")).strip()
+            if w["state"].get(s) != state or (note and note != w["note"].get(s)):
+                set_stage(w, s, state, note)
+    return added, updated
