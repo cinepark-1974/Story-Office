@@ -18,6 +18,7 @@ from system_view import FRAME_HEIGHT, build_html
 import staff
 import storage
 import works
+import pitches
 
 KST = timezone(timedelta(hours=9))
 
@@ -533,6 +534,10 @@ def office_page() -> None:
         works_board()
     except Exception as e:
         st.markdown(f'<div class="so-err">작품 현황판을 열지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
+    try:
+        pitch_board()
+    except Exception as e:
+        st.markdown(f'<div class="so-err">제안 현황을 열지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
     partner_card()
     st.markdown('<div id="so-tools" class="so-group" style="margin-top:40px">도구함</div>'
                 '<div class="so-gnote">직원들이 쓰는 엔진입니다. 열기는 엔진 앱, 개발실은 그 엔진을 고치는 Claude 프로젝트입니다.</div>',
@@ -670,6 +675,126 @@ def works_board() -> None:
                     w["archived"] = False
                     w["updated"] = works._now()
                     save(f"{w['title']} 되돌림")
+
+
+# ---------- 제안 현황 ----------
+def pitch_board() -> None:
+    if not st.session_state.get("office_unlocked"):
+        return
+    st.markdown('<div id="so-pitch" class="so-group">제안 현황</div>'
+                '<div class="so-gnote">작품을 누구에게 언제 제안했고 어떤 답을 받았는지 점검합니다. 실명과 평가가 들어 있어 기록 보관함(R2)에만 저장합니다.</div>',
+                unsafe_allow_html=True)
+    arc, _err = _archive()
+    if not arc:
+        st.info("제안 현황은 기록 보관함(R2)에 저장됩니다. 보관함이 연결되면 열립니다.")
+        return
+    rows = arc.load_pitches()
+
+    def save(msg: str) -> None:
+        arc.save_pitches(rows)
+        st.toast(msg)
+        st.rerun()
+
+    if rows:
+        c = pitches.check(rows)
+        late = [p for p in c["waiting"] if p["late"]]
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("제안", len(rows))
+        a2.metric("답을 기다리는 중", len(c["waiting"]))
+        a3.metric(f"{c['wait']}일 넘게 답 없음", len(late), help="지금까지 답이 오기까지 걸린 날의 가운데 값을 기준으로 삼습니다.")
+        a4.metric("날짜 확인 필요", len(c["odd"]), help="피드백 날짜가 제안 날짜보다 앞선 기록입니다.")
+        if late:
+            st.markdown("**다시 연락해 볼 제안**")
+            for p in late:
+                st.markdown(f"- {html.escape(p['work'])} · {html.escape(p['person'] or '이름 없음')}"
+                            f"{' (' + html.escape(p['company']) + ')' if p['company'] else ''} · 제안 {p['sent']} · **{p['days']}일째**")
+        if c["odd"]:
+            with st.expander(f"날짜 확인 필요 ({len(c['odd'])}건)"):
+                for p in c["odd"]:
+                    st.caption(f"{p['work']} · {p['person']} ({p['company']}) · 제안 {p['sent']} / 피드백 {p['reply']}")
+        if c["stale"]:
+            with st.expander(f"{pitches.STALE}일 넘게 답이 없는 제안 ({len(c['stale'])}건)"):
+                for p in c["stale"]:
+                    st.caption(f"{p['work']} · {p['person']} ({p['company']}) · 제안 {p['sent']}")
+                if st.button("모두 무응답으로 정리", key="pitch_stale"):
+                    ids = {p["id"] for p in c["stale"]}
+                    for p in rows:
+                        if p["id"] in ids:
+                            p["result"] = "무응답"
+                    save(f"{len(ids)}건을 무응답으로 정리")
+
+        st.markdown("**작품별**")
+        table = []
+        for w, v in sorted(c["by_work"].items(), key=lambda x: x[1]["last"], reverse=True):
+            row = {"작품": w, "제안": v["sent"], "답변": v["answered"], "마지막 제안": v["last"]}
+            row.update({r: v["results"].get(r, 0) for r in pitches.RESULTS if r})
+            table.append(row)
+        st.dataframe(table, hide_index=True, use_container_width=True)
+
+        companies = sorted(c["by_company"], key=lambda k: -len(c["by_company"][k]))
+        with st.expander("회사 이력 보기 · 다음 제안 전에 확인"):
+            co = st.selectbox("회사", companies, format_func=lambda k: f"{k} ({len(c['by_company'][k])}건)", key="pitch_co")
+            if co:
+                st.dataframe([{"작품": p["work"], "제안": p["sent"], "담당": p["person"], "소속": p["company"],
+                               "피드백": p["feedback"], "결과": p["result"]}
+                              for p in sorted(c["by_company"][co], key=lambda p: p["sent"])],
+                             hide_index=True, use_container_width=True)
+
+        with st.expander("기록 고치기 · 피드백과 결과 적기"):
+            works_in = sorted({p["work"] for p in rows})
+            pick = st.selectbox("작품", works_in, key="pitch_edit_work")
+            sub = [p for p in rows if p["work"] == pick]
+            edited = st.data_editor(
+                [{k: p[k] for k in ("id", "sent", "person", "company", "reply", "feedback", "result", "memo")} for p in sub],
+                key=f"pitch_editor_{pick}", hide_index=True, use_container_width=True, num_rows="fixed",
+                column_config={
+                    "id": None,
+                    "sent": st.column_config.TextColumn("제안 날짜", help="2026-11-08 형식"),
+                    "person": st.column_config.TextColumn("이름"),
+                    "company": st.column_config.TextColumn("소속"),
+                    "reply": st.column_config.TextColumn("피드백 날짜"),
+                    "feedback": st.column_config.TextColumn("피드백", width="large"),
+                    "result": st.column_config.SelectboxColumn("결과", options=pitches.RESULTS),
+                    "memo": st.column_config.TextColumn("비고"),
+                })
+            if st.button("고친 내용 저장", key="pitch_edit_save", type="primary"):
+                by_id = {p["id"]: p for p in rows}
+                for e in (edited.to_dict("records") if hasattr(edited, "to_dict") else edited):
+                    p = by_id.get(e["id"])
+                    if p:
+                        for k in ("sent", "person", "company", "reply", "feedback", "result", "memo"):
+                            p[k] = str(e.get(k) or "").strip()
+                save(f"{pick} 기록 저장")
+
+    with st.expander("제안 추가"):
+        titles = sorted({p["work"] for p in rows} | {w["title"] for w in (arc.load_works() or []) if not w.get("archived")})
+        c1, c2 = st.columns(2)
+        work = c1.selectbox("작품", titles + ["직접 입력"], key="pnew_work") if titles else "직접 입력"
+        if work == "직접 입력":
+            work = c2.text_input("작품 제목", key="pnew_title")
+        c3, c4, c5 = st.columns(3)
+        sent = c3.date_input("제안 날짜", key="pnew_sent")
+        person = c4.text_input("이름", key="pnew_person")
+        company = c5.text_input("소속", key="pnew_company")
+        memo = st.text_input("비고 (선택)", key="pnew_memo")
+        if st.button("추가", key="pnew_go", type="primary"):
+            if not str(work).strip() or not (person.strip() or company.strip()):
+                st.warning("작품과 이름 또는 소속을 넣어 주십시오.")
+            else:
+                rows.append(pitches.new_pitch(work, sent.isoformat(), person, company, memo=memo))
+                save(f"{work} · {person or company} 제안 추가")
+
+    with st.expander("엑셀에서 불러오기"):
+        st.caption("시트 이름이 작품 제목이고, 첫 줄이 '제안 날짜 · 피드백 날짜 · 제안 대상 이름 · 제안 대상 소속 · 피드백 주요 내용 · 비고'인 엑셀을 읽습니다. 이미 있는 기록은 겹치지 않습니다.")
+        up = st.file_uploader("엑셀 파일", type=["xlsx"], key="pitch_xlsx", label_visibility="collapsed")
+        if up is not None and st.button("불러오기", key="pitch_import", type="primary"):
+            try:
+                new = pitches.read_excel(up.getvalue())
+            except Exception as e:
+                st.error(f"엑셀을 읽지 못했습니다. ({e})")
+            else:
+                n = pitches.merge(rows, new)
+                save(f"{len(new)}건을 읽어 새로 {n}건을 더했습니다")
 
 
 # ---------- SYSTEM: 성계 쇼룸 ----------
