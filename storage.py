@@ -5,6 +5,7 @@ storyoffice/ 폴더에만 씁니다.
 
   storyoffice/scans/20261107_0130_ab12cd34.json   판별 한 번의 결과 전체
   storyoffice/decisions/thriller.json             장르 담당별로 Mr. MOON이 넘긴 것과 버린 것
+  storyoffice/works.json                          작품 현황판
 
 Secrets 네 개(R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET)가
 없으면 보관함 없이도 사무실은 그대로 돌아갑니다.
@@ -98,6 +99,14 @@ class Archive:
     def decided(self, genre: str, scan_id: str) -> dict:
         """이번 판별에서 이미 결정한 소재: {소재 이름: '넘김'|'버림'}"""
         return {r["name"]: r["decision"] for r in self.decisions(genre) if r.get("scan") == scan_id}
+
+
+    # ── 작품 현황판 ──
+    def load_works(self) -> list[dict]:
+        return self._get("works.json", default=[])
+
+    def save_works(self, works: list[dict]) -> None:
+        self._put("works.json", works)
 
 
 def from_secrets(get) -> "Archive | None":

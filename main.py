@@ -17,6 +17,7 @@ from engines import DESKS, GITHUB_OWNER, GROUPS, OFFICE_H, OFFICE_W, PARTNER, SY
 from system_view import FRAME_HEIGHT, build_html
 import staff
 import storage
+import works
 
 KST = timezone(timedelta(hours=9))
 
@@ -86,6 +87,17 @@ header[data-testid="stHeader"] { background:transparent; }
 .so-date.fresh b { color:var(--gold); }
 .so-go { display:inline-block; background:var(--yale); color:#FFFFFF !important; text-decoration:none !important;
   font-size:13px; font-weight:700; padding:7px 14px; border-radius:4px; white-space:nowrap; }
+.so-work { background:var(--glacier); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin:8px 0 2px; }
+.so-work .t { font-size:16px; font-weight:900; color:var(--ink); }
+.so-work .m { font-size:12px; color:var(--muted); margin-left:6px; }
+.so-work .now { font-size:12.5px; color:var(--ink); margin:4px 0 8px; }
+.so-work .now b { color:var(--gold); }
+.so-steps { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.so-step { font-size:11.5px; padding:3px 8px; border:1px solid var(--line); border-radius:3px; color:var(--muted) !important;
+  text-decoration:none !important; background:#FFFFFF; }
+.so-step.done { background:var(--yale); border-color:var(--yale); color:#FFFFFF !important; }
+.so-step.doing { background:var(--gold); border-color:var(--gold); color:var(--ink) !important; font-weight:700; }
+.so-arrow { font-size:10px; color:var(--line); }
 .so-go:hover { background:var(--ink); }
 .so-none { font-size:12px; color:var(--muted); border:1px dashed var(--line); padding:6px 10px; border-radius:4px; white-space:nowrap; }
 .so-partner { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
@@ -517,11 +529,115 @@ def office_page() -> None:
         meeting_section()
     except Exception as e:
         st.markdown(f'<div class="so-err">기획 회의를 열지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
+    try:
+        works_board()
+    except Exception as e:
+        st.markdown(f'<div class="so-err">작품 현황판을 열지 못했습니다. {html.escape(str(e))}</div>', unsafe_allow_html=True)
     partner_card()
     st.markdown('<div id="so-tools" class="so-group" style="margin-top:40px">도구함</div>'
                 '<div class="so-gnote">직원들이 쓰는 엔진입니다. 열기는 엔진 앱, 개발실은 그 엔진을 고치는 Claude 프로젝트입니다.</div>',
                 unsafe_allow_html=True)
     engine_cards()
+
+
+# ---------- 작품 현황판 ----------
+def _work_card(w: dict) -> str:
+    code, state = works.current(w)
+    now = ("<b>완성</b>" if state == "완성" else
+           f'지금 <b>{works.STAGE_LABEL[code]}</b> {state}' + (f' · {html.escape(w["note"].get(code, ""))}' if w["note"].get(code) else ""))
+    chips = []
+    for s in w["stages"]:
+        cls = {"완료": "done", "진행": "doing"}.get(w["state"].get(s), "")
+        url = ENGINE_BY_SHORT.get(s, {}).get("url")
+        tip = html.escape(w["note"].get(s, "") or w["state"].get(s, ""))
+        chip = (f'<a class="so-step {cls}" href="{html.escape(url)}" target="_blank" title="{tip}">{works.STAGE_LABEL[s]}</a>' if url
+                else f'<span class="so-step {cls}" title="{tip}">{works.STAGE_LABEL[s]}</span>')
+        chips.append(chip)
+    meta = " · ".join(x for x in (w["format"], w["genre"], f'고친 날 {w["updated"][:10]}') if x)
+    return (f'<div class="so-work"><span class="t">{html.escape(w["title"])}</span><span class="m">{html.escape(meta)}</span>'
+            f'<div class="now">{now}</div><div class="so-steps">{"<span class=so-arrow>▶</span>".join(chips)}</div></div>')
+
+
+def works_board() -> None:
+    if not st.session_state.get("office_unlocked"):
+        return   # 작품 목록은 비밀번호를 연 뒤에만 보입니다
+    st.markdown('<div id="so-works" class="so-group">작품 현황판</div>'
+                '<div class="so-gnote">엔진으로 개발 중인 작품과 단계입니다. 남색은 끝난 단계, 금색은 진행 중인 단계입니다. '
+                '단계를 누르면 그 엔진이 열립니다. 엔진은 기록을 남기지 않으므로 단계는 여기서 직접 표시합니다.</div>',
+                unsafe_allow_html=True)
+    arc, _err = _archive()
+    if not arc:
+        st.info("작품 현황판은 기록 보관함(R2)에 저장됩니다. 보관함이 연결되면 열립니다.")
+        return
+    all_works = arc.load_works()
+    shown = sorted((w for w in all_works if not w.get("archived")), key=lambda w: w["updated"], reverse=True)
+
+    def save(msg: str) -> None:
+        arc.save_works(all_works)
+        st.toast(msg)
+        st.rerun()
+
+    if not shown:
+        st.caption("아직 등록한 작품이 없습니다. 아래 '작품 추가'에서 넣으십시오.")
+    for w in shown:
+        st.markdown(_work_card(w), unsafe_allow_html=True)
+        if st.session_state.get("work_reset") == w["id"]:   # 위젯을 그리기 전에 비워야 합니다
+            cur = works.current(w)[0] or w["stages"][0]
+            st.session_state["wst_" + w["id"]] = cur
+            st.session_state["wsv_" + w["id"]] = w["state"].get(cur, "대기")
+            st.session_state["wnt_" + w["id"]] = ""
+            st.session_state.pop("work_reset")
+        with st.expander(f"단계 표시 · {w['title']}"):
+            c1, c2 = st.columns([3, 2])
+            if f"wst_{w['id']}" not in st.session_state:
+                cur = works.current(w)[0] or w["stages"][0]
+                st.session_state[f"wst_{w['id']}"] = cur
+                st.session_state[f"wsv_{w['id']}"] = w["state"].get(cur, "대기")
+            stage = c1.selectbox("단계", w["stages"], format_func=lambda s: works.STAGE_LABEL[s], key=f"wst_{w['id']}")
+            state = c2.radio("상태", works.STATES, horizontal=True, key=f"wsv_{w['id']}")
+            note = st.text_input("메모 (선택)", key=f"wnt_{w['id']}", placeholder="예: v3.5 / 2막 다시 / Rewrite 점수 78")
+            b1, b2 = st.columns([1, 1])
+            if b1.button("저장", key=f"wsave_{w['id']}", type="primary", use_container_width=True):
+                works.set_stage(w, stage, state, note)
+                st.session_state["work_reset"] = w["id"]   # 다음 화면에서 칸을 비웁니다
+                save(f"{w['title']} · {works.STAGE_LABEL[stage]} {state}")
+            if b2.button("목록에서 내리기", key=f"warc_{w['id']}", use_container_width=True):
+                w["archived"] = True
+                w["updated"] = works._now()
+                save(f"{w['title']} 목록에서 내림")
+            log = [x for x in w["log"] if x["stage"]][-6:]
+            if log:
+                st.caption("최근 기록")
+                for x in reversed(log):
+                    st.caption(f"{x['date']} · {works.STAGE_LABEL.get(x['stage'], '')} {x['state']}" + (f" · {x['note']}" if x["note"] else ""))
+
+    if st.session_state.pop("work_new_reset", False):
+        st.session_state["wnew_title"] = st.session_state["wnew_genre"] = ""
+    with st.expander("작품 추가"):
+        title = st.text_input("제목", key="wnew_title")
+        c1, c2 = st.columns(2)
+        fmt = c1.selectbox("포맷", list(works.FORMATS), key="wnew_fmt")
+        genre = c2.text_input("장르 (선택)", key="wnew_genre", placeholder="예: 로맨틱 코미디")
+        stages = st.multiselect("거칠 엔진 단계", works.STAGE_ORDER, default=works.FORMATS[fmt], key=f"wnew_stages_{fmt}",
+                                format_func=lambda s: works.STAGE_LABEL[s],
+                                help="포맷에 맞춰 처음 채워 두었습니다. Rewrite·Revise·번역처럼 필요한 단계를 더하거나 빼십시오.")
+        if st.button("등록", key="wnew_go", type="primary"):
+            if not title.strip() or not stages:
+                st.warning("제목과 단계를 하나 이상 넣어 주십시오.")
+            else:
+                all_works.append(works.new_work(title, fmt, genre, stages))
+                st.session_state["work_new_reset"] = True
+                save(f"{title.strip()} 등록")
+    gone = [w for w in all_works if w.get("archived")]
+    if gone:
+        with st.expander(f"내린 작품 ({len(gone)}편)"):
+            for w in gone:
+                c1, c2 = st.columns([4, 1])
+                c1.caption(f"{w['title']} · {w['format']} · 내린 날 {w['updated'][:10]}")
+                if c2.button("되돌리기", key=f"wback_{w['id']}"):
+                    w["archived"] = False
+                    w["updated"] = works._now()
+                    save(f"{w['title']} 되돌림")
 
 
 # ---------- SYSTEM: 성계 쇼룸 ----------
