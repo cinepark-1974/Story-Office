@@ -104,7 +104,8 @@ def _read(d: dict) -> dict | None:
     return None
 
 
-# 드라이브 작품 폴더 규칙 (Mr. MOON 확정): 폴더 이름 = 작품 제목, 기획과 원고가 있으면 완성
+# 드라이브 작품 폴더 규칙 (Mr. MOON 확정): 폴더 이름 = 작품 제목, 기획과 '확정' 원고가 있으면 완성
+# 03.원고에 파일이 있어도 이름에 '확정'이 없으면 엔진 원고(검토 중)로 봅니다
 WRITE_STAGE = {"장편 영화": "WRITER", "OTT 시리즈": "SERIES", "웹소설": "WEBNOVEL", "장편소설": "NOVEL",
                "무협": "WUXIA", "숏폼 드라마": "SHORTFORM", "인터랙티브(FMV)": "FMV"}
 
@@ -139,8 +140,13 @@ def from_folder(title: str, folders: dict, fmt: str = "장편 영화") -> dict:
     if plan:
         stages["CREATOR"] = "완료"
     w = WRITE_STAGE.get(fmt, "WRITER")
-    if draft:
+    final = [f for f in draft if "확정" in unicodedata.normalize("NFC", f)]
+    if final:                 # 파일 이름에 '확정'이 있는 원고 = Mr. MOON이 완성으로 인정한 원고
         stages[w] = "완료"
+        notes[w] = unicodedata.normalize("NFC", final[-1])
+    elif draft:               # 원고는 있지만 확정 표시가 없음 = 엔진 원고, 검토 중
+        stages[w] = "진행"
+        notes[w] = "원고 있음, 확정 전"
     elif plan:
         stages[w] = "대기"
     for f in has("01"):   # 엔진 보고서는 이름으로 덤 표시
