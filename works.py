@@ -22,7 +22,7 @@ STAGE_ORDER = list(STAGE_LABEL)   # 화면에 늘어놓는 순서
 
 # 포맷을 고르면 처음에 채워 주는 단계. 작품마다 고칠 수 있습니다.
 FORMATS = {
-    "장편 영화": ["IDEA", "CREATOR", "WRITER", "REWRITE", "REVISE"],
+    "장편 영화": ["IDEA", "CREATOR", "WRITER"],   # 기획과 원고가 있으면 완성. Rewrite·Revise는 필요할 때 더합니다
     "OTT 시리즈": ["IDEA", "CREATOR", "SERIES"],
     "웹소설": ["IDEA", "CREATOR", "WEBNOVEL"],
     "장편소설": ["IDEA", "CREATOR", "NOVEL"],

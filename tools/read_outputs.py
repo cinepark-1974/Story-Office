@@ -104,6 +104,36 @@ def _read(d: dict) -> dict | None:
     return None
 
 
+# 드라이브 작품 폴더 규칙 (Mr. MOON 확정): 폴더 이름 = 작품 제목, 기획과 원고가 있으면 완성
+WRITE_STAGE = {"장편 영화": "WRITER", "OTT 시리즈": "SERIES", "웹소설": "WEBNOVEL", "장편소설": "NOVEL",
+               "무협": "WUXIA", "숏폼 드라마": "SHORTFORM", "인터랙티브(FMV)": "FMV"}
+
+
+def from_folder(title: str, folders: dict, fmt: str = "장편 영화") -> dict:
+    """folders: {"02_기획개발": [파일 이름…], "03_원고": [...], "04_번역": [...]} → 붙여 넣을 한 줄"""
+    def has(prefix: str) -> list:
+        return [f for k, v in folders.items() if k.startswith(prefix) for f in (v or [])]
+    plan, draft, trans = has("02"), has("03"), has("04")
+    stages, notes = {}, {}
+    if plan or draft:
+        stages["IDEA"] = "완료"
+    if plan:
+        stages["CREATOR"] = "완료"
+    w = WRITE_STAGE.get(fmt, "WRITER")
+    if draft:
+        stages[w] = "완료"
+    elif plan:
+        stages[w] = "대기"
+    for f in trans:
+        name = unicodedata.normalize("NFC", f)
+        if re.search(r"영어|english|_en[_.]", name, re.I):
+            stages["ENGLISH"] = "완료"
+        elif re.search(r"일본|japanese|_ja[_.]|_jp[_.]", name, re.I):
+            stages["JAPANESE"] = "완료"
+    return {"title": unicodedata.normalize("NFC", title).strip(), "format": fmt, "genre": "",
+            "stages": {s: stages[s] for s in ORDER if s in stages}, "notes": notes}
+
+
 def build(records: list[dict]) -> dict:
     """같은 작품·같은 단계는 날짜가 늦은 것을 씁니다."""
     works: dict[str, dict] = {}
