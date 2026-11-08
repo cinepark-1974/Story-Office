@@ -784,6 +784,24 @@ def pitch_board() -> None:
                 rows.append(pitches.new_pitch(work, sent.isoformat(), person, company, memo=memo))
                 save(f"{work} · {person or company} 제안 추가")
 
+    with st.expander("한 번에 등록 · Claude가 메일함을 정리한 글 붙여넣기"):
+        st.caption("Claude가 보낸편지함·받은편지함을 읽고 정리해 준 글을 그대로 붙여 넣으십시오. 같은 작품·날짜·사람·소속은 겹치지 않고, 빈 피드백만 채웁니다.")
+        if st.session_state.pop("pitch_bulk_reset", False):
+            st.session_state["pbulk"] = ""
+        raw = st.text_area("붙여 넣을 글", key="pbulk", height=140, label_visibility="collapsed")
+        if st.button("한 번에 등록", key="pbulk_go", type="primary"):
+            try:
+                new = pitches.from_paste(staff._json(raw))
+            except Exception as e:
+                st.error(f"글을 읽지 못했습니다. ({e})")
+            else:
+                if not new:
+                    st.warning("등록할 제안을 찾지 못했습니다.")
+                else:
+                    n = pitches.merge(rows, new)
+                    st.session_state["pitch_bulk_reset"] = True
+                    save(f"{len(new)}건을 읽어 새로 {n}건을 더했습니다")
+
     with st.expander("엑셀에서 불러오기"):
         st.caption("시트 이름이 작품 제목이고, 첫 줄이 '제안 날짜 · 피드백 날짜 · 제안 대상 이름 · 제안 대상 소속 · 피드백 주요 내용 · 비고'인 엑셀을 읽습니다. 이미 있는 기록은 겹치지 않습니다.")
         up = st.file_uploader("엑셀 파일", type=["xlsx"], key="pitch_xlsx", label_visibility="collapsed")

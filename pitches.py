@@ -123,3 +123,15 @@ def check(rows: list[dict]) -> dict:
         if p["company"]:   # '씨제이 중국팀'과 '씨제이 투자'는 같은 회사로 묶습니다
             by_company.setdefault(p["company"].split()[0], []).append(p)
     return {"wait": wait, "waiting": waiting, "stale": stale, "odd": odd, "by_work": by_work, "by_company": by_company}
+
+
+def from_paste(payload: dict) -> list[dict]:
+    """Claude가 메일함을 정리해 준 글 → 제안 기록. {"pitches":[{"work","sent","person","company","reply","feedback","memo"}]}"""
+    out = []
+    for r in (payload.get("pitches") or []):
+        if not str(r.get("work", "")).strip():
+            continue
+        out.append(new_pitch(str(r["work"]), _day(r.get("sent")), str(r.get("person", "")), str(r.get("company", "")),
+                             _day(r.get("reply")), str(r.get("feedback", "")), str(r.get("memo", "")),
+                             str(r.get("result", ""))))
+    return out
