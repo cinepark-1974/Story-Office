@@ -42,10 +42,10 @@ def norm(title: str) -> str:
     return unicodedata.normalize("NFC", str(title or "")).strip()
 
 
-def new_work(title: str, fmt: str, genre: str, stages: list[str]) -> dict:
+def new_work(title: str, fmt: str, genre: str, stages: list[str], line: str = "") -> dict:
     title = norm(title)
     stages = [s for s in STAGE_ORDER if s in stages]   # 순서를 바로잡습니다
-    return {"id": uuid.uuid4().hex[:8], "title": title, "format": fmt, "genre": genre.strip(),
+    return {"id": uuid.uuid4().hex[:8], "title": title, "format": fmt, "genre": genre.strip(), "line": str(line or "").strip(),
             "stages": stages, "state": {s: "대기" for s in stages}, "note": {s: "" for s in stages},
             "log": [{"date": _now(), "stage": "", "state": "", "note": "등록"}],
             "created": _now(), "updated": _now(), "archived": False}
@@ -76,7 +76,7 @@ def current(work: dict) -> tuple[str, str]:
 def merge(all_works: list[dict], payload: list[dict]) -> tuple[list[str], list[str]]:
     """Claude가 정리한 목록을 현황판에 합칩니다. 제목이 같으면 고치고, 없으면 새로 넣습니다.
 
-    payload 한 줄: {"title": "...", "format": "장편 영화", "genre": "...",
+    payload 한 줄: {"title": "...", "format": "장편 영화", "genre": "...", "line": "슈퍼스토리",
                     "stages": {"IDEA": "완료", "WRITER": "진행"}, "notes": {"WRITER": "v2.1"}}
     """
     added, updated = [], []
@@ -90,7 +90,7 @@ def merge(all_works: list[dict], payload: list[dict]) -> tuple[list[str], list[s
         w = by_title.get(title.replace(" ", ""))
         if w is None:
             fmt = row.get("format") if row.get("format") in FORMATS else "장편 영화"
-            w = new_work(title, fmt, str(row.get("genre", "")), FORMATS[fmt] + list(stages))   # 포맷 기본 단계 + 정리된 단계
+            w = new_work(title, fmt, str(row.get("genre", "")), FORMATS[fmt] + list(stages), row.get("line", ""))   # 포맷 기본 단계 + 정리된 단계
             all_works.append(w)
             by_title[title.replace(" ", "")] = w
             added.append(title)
@@ -101,6 +101,8 @@ def merge(all_works: list[dict], payload: list[dict]) -> tuple[list[str], list[s
                 for s in new:
                     w["state"][s], w["note"][s] = "대기", ""
             w["archived"] = False
+            if row.get("line"):
+                w["line"] = str(row["line"]).strip()
             updated.append(title)
         for s, state in stages.items():
             note = str(notes.get(s, "")).strip()

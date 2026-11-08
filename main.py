@@ -553,7 +553,7 @@ def _work_card(w: dict) -> str:
         chip = (f'<a class="so-step {cls}" href="{html.escape(url)}" target="_blank" title="{tip}">{works.STAGE_LABEL[s]}</a>' if url
                 else f'<span class="so-step {cls}" title="{tip}">{works.STAGE_LABEL[s]}</span>')
         chips.append(chip)
-    meta = " · ".join(x for x in (w["format"], w["genre"], f'고친 날 {w["updated"][:10]}') if x)
+    meta = " · ".join(x for x in (w.get("line", ""), w["format"], w["genre"], f'고친 날 {w["updated"][:10]}') if x)
     return (f'<div class="so-work"><span class="t">{html.escape(w["title"])}</span><span class="m">{html.escape(meta)}</span>'
             f'<div class="now">{now}</div><div class="so-steps">{"<span class=so-arrow>▶</span>".join(chips)}</div></div>')
 
@@ -571,6 +571,13 @@ def works_board() -> None:
         return
     all_works = arc.load_works()
     shown = sorted((w for w in all_works if not w.get("archived")), key=lambda w: w["updated"], reverse=True)
+    lines = sorted({w.get("line", "") for w in shown if w.get("line")})
+    if lines:   # 라인(작품 묶음)이 있으면 골라 볼 수 있습니다
+        pick = st.radio("라인", ["전체"] + lines + ["라인 없음"], horizontal=True, key="work_line", label_visibility="collapsed")
+        if pick == "라인 없음":
+            shown = [w for w in shown if not w.get("line")]
+        elif pick != "전체":
+            shown = [w for w in shown if w.get("line") == pick]
 
     def save(msg: str) -> None:
         arc.save_works(all_works)
@@ -605,6 +612,12 @@ def works_board() -> None:
                 w["archived"] = True
                 w["updated"] = works._now()
                 save(f"{w['title']} 목록에서 내림")
+            c3, c4 = st.columns([3, 1])
+            new_line = c3.text_input("라인", value=w.get("line", ""), key=f"wln_{w['id']}", placeholder="예: 슈퍼스토리")
+            if c4.button("라인 저장", key=f"wlns_{w['id']}", use_container_width=True) and new_line.strip() != w.get("line", ""):
+                w["line"] = new_line.strip()
+                w["updated"] = works._now()
+                save(f"{w['title']} 라인 · {w['line'] or '없음'}")
             log = [x for x in w["log"] if x["stage"]][-6:]
             if log:
                 st.caption("최근 기록")
@@ -612,12 +625,13 @@ def works_board() -> None:
                     st.caption(f"{x['date']} · {works.STAGE_LABEL.get(x['stage'], '')} {x['state']}" + (f" · {x['note']}" if x["note"] else ""))
 
     if st.session_state.pop("work_new_reset", False):
-        st.session_state["wnew_title"] = st.session_state["wnew_genre"] = ""
+        st.session_state["wnew_title"] = st.session_state["wnew_genre"] = st.session_state["wnew_line"] = ""
     with st.expander("작품 추가"):
         title = st.text_input("제목", key="wnew_title")
         c1, c2 = st.columns(2)
         fmt = c1.selectbox("포맷", list(works.FORMATS), key="wnew_fmt")
         genre = c2.text_input("장르 (선택)", key="wnew_genre", placeholder="예: 로맨틱 코미디")
+        line = st.text_input("라인 (선택)", key="wnew_line", placeholder="예: 슈퍼스토리")
         stages = st.multiselect("거칠 엔진 단계", works.STAGE_ORDER, default=works.FORMATS[fmt], key=f"wnew_stages_{fmt}",
                                 format_func=lambda s: works.STAGE_LABEL[s],
                                 help="포맷에 맞춰 처음 채워 두었습니다. Rewrite·Revise·번역처럼 필요한 단계를 더하거나 빼십시오.")
@@ -625,7 +639,7 @@ def works_board() -> None:
             if not title.strip() or not stages:
                 st.warning("제목과 단계를 하나 이상 넣어 주십시오.")
             else:
-                all_works.append(works.new_work(title, fmt, genre, stages))
+                all_works.append(works.new_work(title, fmt, genre, stages, line))
                 st.session_state["work_new_reset"] = True
                 save(f"{title.strip()} 등록")
     with st.expander("한 번에 등록 · Claude가 정리한 목록 붙여넣기"):
