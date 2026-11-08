@@ -109,6 +109,25 @@ WRITE_STAGE = {"장편 영화": "WRITER", "OTT 시리즈": "SERIES", "웹소설"
                "무협": "WUXIA", "숏폼 드라마": "SHORTFORM", "인터랙티브(FMV)": "FMV"}
 
 
+FOLDER_FORMAT = {"영화": "장편 영화", "시리즈": "OTT 시리즈", "드라마": "OTT 시리즈", "웹소설": "웹소설", "소설": "장편소설",
+                 "무협": "무협", "숏폼": "숏폼 드라마", "FMV": "인터랙티브(FMV)"}
+
+
+def parse_folder_name(name: str) -> tuple[str, str, str]:
+    """'01.영화_TAKE OFF(인도네시아)' → ('TAKE OFF', '장편 영화', '인도네시아')"""
+    name = unicodedata.normalize("NFC", name).strip()
+    name = re.sub(r"^\d+\s*[._]\s*", "", name)            # 앞 번호
+    fmt = "장편 영화"
+    m = re.match(r"([^_]+)_(.+)", name)
+    if m and m.group(1).strip() in FOLDER_FORMAT:
+        fmt, name = FOLDER_FORMAT[m.group(1).strip()], m.group(2)
+    extra = ""
+    m = re.match(r"(.+?)\s*\(([^)]*)\)\s*$", name)
+    if m:
+        name, extra = m.group(1), m.group(2)
+    return name.strip(), fmt, extra.strip()
+
+
 def from_folder(title: str, folders: dict, fmt: str = "장편 영화") -> dict:
     """folders: {"02_기획개발": [파일 이름…], "03_원고": [...], "04_번역": [...]} → 붙여 넣을 한 줄"""
     def has(prefix: str) -> list:
@@ -124,9 +143,12 @@ def from_folder(title: str, folders: dict, fmt: str = "장편 영화") -> dict:
         stages[w] = "완료"
     elif plan:
         stages[w] = "대기"
+    for f in has("01"):   # 엔진 보고서는 이름으로 덤 표시
+        if re.search(r"rewrite|리라이트", unicodedata.normalize("NFC", f), re.I):
+            stages["REWRITE"] = "완료"
     for f in trans:
         name = unicodedata.normalize("NFC", f)
-        if re.search(r"영어|english|_en[_.]", name, re.I):
+        if re.search(r"영어|english|_eng?[_.]", name, re.I):
             stages["ENGLISH"] = "완료"
         elif re.search(r"일본|japanese|_ja[_.]|_jp[_.]", name, re.I):
             stages["JAPANESE"] = "완료"
