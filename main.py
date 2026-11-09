@@ -78,6 +78,7 @@ header[data-testid="stHeader"] { background:transparent; }
 .so-card { background:var(--glacier); border:1px solid var(--line); border-radius:6px; padding:16px 16px 14px;
   min-height:176px; display:flex; flex-direction:column; margin-bottom:14px; }
 .so-name { font-size:17px; font-weight:900; color:var(--ink); }
+.so-ctag { font-size:10.5px; font-weight:700; letter-spacing:0.14em; color:var(--muted); margin-top:3px; }
 .so-desc { font-size:13.5px; color:var(--ink); line-height:1.55; margin:8px 0 12px; flex:1; }
 .so-foot { display:flex; align-items:center; justify-content:flex-end; gap:6px; border-top:1px solid var(--line); padding-top:10px; margin-top:8px; }
 .so-dev { display:inline-block; color:var(--yale) !important; text-decoration:none !important; font-size:13px; font-weight:700;
@@ -504,6 +505,7 @@ def render_card(engine: dict) -> str:
     return clean(f"""
 <div class="so-card">
   <div class="so-name">{html.escape(engine["name"])}</div>
+  <div class="so-ctag">{html.escape(engine.get("tag", ""))}</div>
   <div class="so-desc">{html.escape(engine["desc"])}</div>
   <div class="so-date{' fresh' if fresh else ''}">최근 수정<b>{label}</b></div>
   <div class="so-foot">{dev}{action}</div>
