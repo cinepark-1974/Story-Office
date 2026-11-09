@@ -108,6 +108,18 @@ header[data-testid="stHeader"] { background:transparent; }
 .so-err { background:#FFFFFF; border:1px dashed var(--line); border-radius:6px; padding:14px; font-size:13px; color:var(--muted); margin-bottom:14px; }
 .so-office { position:relative; width:100%; margin:22px 0 6px; }
 .so-office img { display:block; width:100%; height:auto; border-radius:8px; }
+/* 문 앞 로봇: 행성처럼 바닥 위를 천천히 타원으로 돕니다. 브라우저 안의 움직임이라 비용이 없습니다. */
+.so-office img.so-robot { position:absolute; left:47.25%; top:74.92%; width:5.98%; height:auto; border-radius:0;
+  pointer-events:none; transform-origin:50% 100%; filter:drop-shadow(-10px 5px 4px rgba(90,45,10,.35));
+  animation:so-robot-orbit 18s linear infinite; }
+@keyframes so-robot-orbit {
+  0%   { transform:translate(0%, 6%) scale(1.04); }
+  25%  { transform:translate(55%, 0%) scale(1.0); }
+  50%  { transform:translate(0%, -6%) scale(0.96); }
+  75%  { transform:translate(-55%, 0%) scale(1.0); }
+  100% { transform:translate(0%, 6%) scale(1.04); }
+}
+@media (prefers-reduced-motion: reduce) { .so-office img.so-robot { animation:none; } }
 .so-seat { position:absolute; display:block; border-radius:8px; }
 .so-seat.link { cursor:pointer; }
 .so-seat:hover, .so-seat:focus { outline:2px solid #FFFFFF; background:rgba(15,59,89,.14); z-index:5; }
@@ -224,7 +236,8 @@ def office_scene() -> str:
             seats.append(seat_html(d, e["name"], sub, e["url"]))
     seats.append(seat_html("partner", PARTNER["name"], "열기" if PARTNER["url"] else "주소 대기", PARTNER["url"]))
     seats.append(seat_html("boss", "MR. MOON", "결재석 · 넘길 아이디어를 고릅니다", "#so-meeting"))
-    return ('<div class="so-office"><img src="app/static/office.webp" alt="STORY OFFICE">' + "".join(seats) + "</div>")
+    robot = '<img class="so-robot" src="app/static/robot.webp" alt="">'
+    return ('<div class="so-office"><img src="app/static/office_bg.webp" alt="STORY OFFICE">' + robot + "".join(seats) + "</div>")
 
 
 # ---------- 기획 회의 ----------
