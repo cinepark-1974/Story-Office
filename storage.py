@@ -64,7 +64,7 @@ class Archive:
         now = datetime.fromtimestamp(job["started"], KST)
         key = f"scans/{now:%Y%m%d_%H%M}_{scan_id}.json"
         self._put(key, {"id": scan_id, "started_label": job["started_label"], "elapsed": job["elapsed"],
-                        "direction": job["direction"], "genre": job["genre"], "result": job["result"]})
+                        "direction": job["direction"], "genre": job["genre"], "format": job.get("format", ""), "result": job["result"]})
         return key
 
     def list_scans(self, limit: int = 30) -> list[str]:

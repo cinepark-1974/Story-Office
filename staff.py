@@ -61,6 +61,32 @@ GENRE_DESKS = {
                   "where": "역사 기록과 사료 속 잘 알려지지 않은 인물·사건, 시대가 바뀌며 사라진 직업과 제도"},
 }
 
+# ── 형식 ──────────────────────────────────────────────
+# fit: 그 형식이 서려면 현실 소재 안에 이미 있어야 하는 구조 / engine: 넘길 엔진 (engines.py short)
+# idea_format: Idea Engine STEP 1 '선호 포맷' 선택지
+FORMAT_DESKS = {
+    "장편 영화": {"fit": "두 시간 안에 시작과 끝이 닫히는 사건 하나와 되돌릴 수 없는 선택 하나",
+                 "engine": "IDEA", "idea_format": "장편 영화"},
+    "OTT 시리즈": {"fit": "회마다 새 사건이 생기는 무대나 관계망, 그리고 시즌 전체를 끌고 갈 큰 질문 하나",
+                  "engine": "IDEA", "idea_format": "OTT 시리즈"},
+    "숏폼 드라마 (실사)": {"fit": "1분 안에 터지는 폭로나 반전이 수십 번 반복될 수 있는 관계 구도와 숨긴 비밀",
+                        "engine": "SHORTFORM"},
+    "숏폼 애니메이션": {"fit": "대사 없이 행동 하나로 보이는 상황이 매회 변주되는 것, 실사로 찍기 어려운 시점(동물·사물·신·아이)",
+                     "engine": "SHORTFORM"},
+    "웹소설": {"fit": "회차마다 보상(작은 승리나 폭로)이 나오는 긴 성장·복수·역전의 사다리",
+              "engine": "IDEA", "idea_format": "웹소설"},
+    "장편소설·e북": {"fit": "한 인물의 내면을 오래 따라갈 수 있는 감정의 변화와 끝까지 숨겨진 사실 하나",
+                   "engine": "IDEA", "idea_format": "미정 (Idea Engine이 추천)"},
+    "인터랙티브 (FMV)": {"fit": "보는 사람이 실제로 고를 만한 갈림길이 있고, 선택마다 결과가 크게 갈리는 상황",
+                       "engine": "FMV"},
+}
+
+
+def format_route(fmt: str) -> str:
+    """이 형식의 소재를 넘길 엔진 (engines.py short). 형식 미정이면 Idea Engine."""
+    return FORMAT_DESKS.get(fmt, {}).get("engine", "IDEA")
+
+
 # 사무실 그림 자리 (engines.DESKS 이름)
 STAFF = {
     "scout": {"title": "소재 발굴 담당", "desk": "series"},
@@ -219,14 +245,17 @@ class Ledger:
 
 
 # ── 1. 소재 발굴 ─────────────────────────────────────────
-def scout(client, direction: str, ledger: Ledger, genre: str = "", memory: str = "") -> dict:
+def scout(client, direction: str, ledger: Ledger, genre: str = "", memory: str = "", fmt: str = "") -> dict:
     desk = GENRE_DESKS.get(genre)
+    form = FORMAT_DESKS.get(fmt)
     system = (
         "너는 BLUE JEANS PICTURES 기획실의 소재 발굴 담당이다. 영화·드라마·웹소설 등 기존 작품은 찾지 않는다. "
         "현실에서 이야기의 재료를 찾는다: 최근 뉴스, 판결, 제도·법 변화, 새로 생기거나 사라지는 직업, 기술, 지역 풍습, 사건·사고, 하위문화. "
         "한국어뿐 아니라 영어·일본어·현지어로 전 세계를 검색한다. " + HOUSE_RULES
         + (f" 너는 {genre} 담당이다. 이 장르의 재미는 '{desk['core']}'에서 나온다. 그 재미가 바로 생길 현실을 이런 곳에서 찾는다: {desk['where']}."
            if desk else "")
+        + (f" 이번 형식은 {fmt}이다. 이 형식이 서려면 '{form['fit']}'이 필요하다. 그런 구조가 현실 안에 이미 들어 있는 소재를 우선 찾는다."
+           if form else "")
     )
     user = (
         "웹 검색을 여러 번 해서 현실 소재 5~8개를 찾고 JSON으로만 답하라.\n"
@@ -254,8 +283,9 @@ def scout(client, direction: str, ledger: Ledger, genre: str = "", memory: str =
 _GENERIC = re.compile(r"(정의감|상처를 가진|평범한|강인한|따뜻한|냉철한|원칙주의)")
 
 
-def gate(client, candidates: list[dict], direction: str = "", genre: str = "") -> list[dict]:
+def gate(client, candidates: list[dict], direction: str = "", genre: str = "", fmt: str = "") -> list[dict]:
     desk = GENRE_DESKS.get(genre)
+    form = FORMAT_DESKS.get(fmt)
     listing = "\n".join(f"{i}. {c['name']} ({c.get('where_when', '')}): {c['fact']}" for i, c in enumerate(candidates, 1))
     system = (
         "너는 BLUE JEANS PICTURES 기획실의 판별 담당이다. 이야기를 지어내지 않는다. 소재 안에 이야기의 씨앗이 이미 있는지만 가린다. "
@@ -267,10 +297,13 @@ def gate(client, candidates: list[dict], direction: str = "", genre: str = "") -
         "② want / block: 그 사람이 원하는 것, 그것을 막는 것. 한 줄로 서지 않으면 빈 문자열.\n"
         "③ twist: 원하는 것을 쫓을수록 상황이 뒤집히는 역전(BUT/EXCEPT). 없으면 빈 문자열.\n"
         + (f"④ genre_core: {genre}의 재미는 '{desk['core']}'다. 이 소재에서 그 재미가 구체적으로 어떻게 생기는지 한 문장. 생기지 않으면 빈 문자열.\n"
-           "네 조건이 모두 서면" if desk else "셋이 모두 서면")
-        + " has_idea=true, seed 에 '누가 무엇을 원하는데 무엇이 막는다' 한 문장을 다듬지 말고 쓴다. "
+           if desk else "")
+        + (f"형식 format_fit: 이번 형식은 {fmt}이고, '{form['fit']}'이 있어야 선다. 이 소재 안에서 그 구조가 구체적으로 무엇인지 한 문장. 없으면 빈 문자열.\n"
+           if form else "")
+        + "모든 조건이 서면"
+        " has_idea=true, seed 에 '누가 무엇을 원하는데 무엇이 막는다' 한 문장을 다듬지 말고 쓴다. "
         "하나라도 비면 has_idea=false, missing 에 빠진 조건 번호.\nJSON으로만 답하라.\n"
-        '{"results":[{"no":1,"has_idea":true,"who":"","want":"","block":"","twist":"","genre_core":"","seed":"","missing":[]}]}\n\n'
+        '{"results":[{"no":1,"has_idea":true,"who":"","want":"","block":"","twist":"","genre_core":"","format_fit":"","seed":"","missing":[]}]}\n\n'
         + (f"[Mr. MOON 관심 방향] {direction}\n" if direction.strip() else "") + f"[소재]\n{listing}"
     )
     data, _res = _ask_json(client, system, user, 3500, 0, "판별 담당")
@@ -279,7 +312,7 @@ def gate(client, candidates: list[dict], direction: str = "", genre: str = "") -
     out = []
     for i, c in enumerate(candidates, 1):
         r = by_no.get(i, {})
-        parts = {k: str(r.get(k, "") or "").strip() for k in ("who", "want", "block", "twist", "genre_core", "seed")}
+        parts = {k: str(r.get(k, "") or "").strip() for k in ("who", "want", "block", "twist", "genre_core", "format_fit", "seed")}
         missing = []
         if not parts["who"] or _GENERIC.search(parts["who"]):
             missing.append("① 결핍·상실을 가진 사람")
@@ -289,34 +322,43 @@ def gate(client, candidates: list[dict], direction: str = "", genre: str = "") -
             missing.append("③ 역전")
         if desk and not parts["genre_core"]:
             missing.append(f"④ {genre}의 재미({desk['core']})")
+        if form and not parts["format_fit"]:
+            missing.append(f"{fmt} 형식 요건")
         has = bool(r.get("has_idea")) and not missing and bool(parts["seed"])   # 코드가 다시 확인
         out.append({**c, **parts, "has_idea": has, "missing": missing if not has else []})
     return out
 
 
 # ── 전체 ───────────────────────────────────────────────
-def run_scan(client, direction: str = "", progress=None, genre: str = "", memory: str = "") -> dict:
+def run_scan(client, direction: str = "", progress=None, genre: str = "", memory: str = "", fmt: str = "") -> dict:
     say = progress or (lambda _m: None)
     ledger = Ledger()
     if genre in GENRE_DESKS:
         say(f"{genre} 담당이 찾고 있습니다: {GENRE_DESKS[genre]['where']}")
     else:
         say("소재 발굴 담당이 전 세계 뉴스·보고서·제도를 검색하고 있습니다")
+    if fmt in FORMAT_DESKS:
+        say(f"형식은 {fmt}입니다. 소재 안에 '{FORMAT_DESKS[fmt]['fit']}'이 있는지까지 봅니다")
     if memory:
         say("지난 넘김·버림 기록을 읽고 시작합니다")
-    sc = scout(client, direction, ledger, genre, memory)
+    sc = scout(client, direction, ledger, genre, memory, fmt)
     if not sc["candidates"]:
         raise RuntimeError("실제 검색 근거가 있는 소재를 찾지 못했습니다. 방향을 바꿔 다시 시도해 주십시오.")
     say(f"판별 담당이 소재 {len(sc['candidates'])}개에 이야기가 있는지 가리고 있습니다")
-    items = gate(client, sc["candidates"], direction, genre)
+    items = gate(client, sc["candidates"], direction, genre, fmt)
     items.sort(key=lambda x: not x["has_idea"])
     return {"items": items, "sources": ledger.items, "searches": ledger.searches,
-            "dropped": sc["dropped"], "direction": direction, "genre": genre}
+            "dropped": sc["dropped"], "direction": direction, "genre": genre, "format": fmt}
 
 
-def idea_engine_input(item: dict) -> str:
-    """Idea Engine STEP 1 '원본 아이디어' 칸에 붙일 글."""
-    return (f"{item['seed']}\n\n"
+def idea_engine_input(item: dict, fmt: str = "") -> str:
+    """넘길 엔진의 아이디어 칸에 붙일 글. 형식이 정해져 있으면 형식 요건도 함께 붙입니다."""
+    form = FORMAT_DESKS.get(fmt)
+    head = ""
+    if form:
+        head = f"[형식] {fmt}" + (f" (Idea Engine 선호 포맷: {form['idea_format']})" if form.get("idea_format") else "") + "\n"
+    return (head + f"{item['seed']}\n\n"
             f"[현실 소재] {item['name']} ({item.get('where_when', '')}): {item['fact']}\n"
             f"[결핍·상실] {item['who']}\n[원하는 것] {item['want']}\n[막는 것] {item['block']}\n[역전] {item['twist']}"
-            + (f"\n[장르의 재미] {item['genre_core']}" if item.get("genre_core") else ""))
+            + (f"\n[장르의 재미] {item['genre_core']}" if item.get("genre_core") else "")
+            + (f"\n[형식 요건] {item['format_fit']}" if item.get("format_fit") else ""))

@@ -275,7 +275,9 @@ def render_scan(result: dict, scan_id: str = "", genre: str = "", ui: str = "now
     st.markdown(f'<div class="so-gnote" style="margin:10px 0 6px">소재 {len(items)}개 중 <b>이야기 있음 {len(yes)}개</b> · '
                 f'검색 {result["searches"]}회' + (f' · 출처 없는 소재 {result["dropped"]}개 버림' if result.get("dropped") else "") + '</div>',
                 unsafe_allow_html=True)
-    idea_url = ENGINE_BY_SHORT.get("IDEA", {}).get("url")
+    fmt = result.get("format", "")
+    route = ENGINE_BY_SHORT.get(staff.format_route(fmt), {}) or ENGINE_BY_SHORT.get("IDEA", {})
+    route_name, idea_url = route.get("name", "Idea Engine"), route.get("url")
     arc, _err = _archive()
     decided = {}
     if arc and scan_id:
@@ -293,7 +295,8 @@ def render_scan(result: dict, scan_id: str = "", genre: str = "", ui: str = "now
             body = (f'<div class="so-seed">{html.escape(it["seed"])}</div>'
                     f'<div class="so-gnote" style="margin:4px 0 0">결핍·상실 · {html.escape(it["who"])}<br>원하는 것 · {html.escape(it["want"])} / '
                     f'막는 것 · {html.escape(it["block"])}<br>역전 · {html.escape(it["twist"])}'
-                    + (f'<br>장르의 재미 · {html.escape(it["genre_core"])}' if it.get("genre_core") else "") + '</div>')
+                    + (f'<br>장르의 재미 · {html.escape(it["genre_core"])}' if it.get("genre_core") else "")
+                    + (f'<br>형식 요건 · {html.escape(it["format_fit"])}' if it.get("format_fit") else "") + '</div>')
         else:
             body = f'<div class="so-gnote" style="margin:4px 0 0">빠진 조건 · {html.escape(", ".join(it["missing"]))}</div>'
         st.markdown(clean(f"""
@@ -302,11 +305,15 @@ def render_scan(result: dict, scan_id: str = "", genre: str = "", ui: str = "now
   <div style="margin-top:4px">{html.escape(it["fact"])}</div>{body}
 </div>"""), unsafe_allow_html=True)
         if it["has_idea"]:
-            with st.expander(f"Idea Engine으로 넘기기 · {it['name']}"):
-                st.caption("복사 버튼으로 복사해 Idea Engine STEP 1의 '원본 아이디어' 칸에 붙여 넣으면 됩니다. 제목·장르는 직접 정하십시오.")
-                st.code(staff.idea_engine_input(it), language=None)
+            with st.expander(f"{route_name}으로 넘기기 · {it['name']}"):
+                if route_name == "Idea Engine":
+                    st.caption("복사 버튼으로 복사해 Idea Engine STEP 1의 '원본 아이디어' 칸에 붙여 넣으면 됩니다. 제목·장르는 직접 정하십시오.")
+                else:
+                    st.caption(f"{fmt}은 Idea Engine을 거치지 않고 {route_name}으로 바로 갑니다. 복사해 커스텀 아이디어 칸에 붙이고, "
+                               "주인공·시즌 질문 같은 필수 칸은 이 내용을 보고 직접 채우십시오.")
+                st.code(staff.idea_engine_input(it, fmt), language=None)
                 if idea_url:
-                    st.link_button("Idea Engine 열기", idea_url)
+                    st.link_button(f"{route_name} 열기", idea_url)
                 if arc and scan_id:
                     st.caption("넘김과 버림을 남기면 이 장르 담당이 다음 판별 때 읽고, 같은 소재는 다시 가져오지 않습니다.")
                     reason = st.text_input("버리는 이유 (선택)", key=f"why_{ui}_{scan_id}_{n}",
@@ -320,7 +327,7 @@ def render_scan(result: dict, scan_id: str = "", genre: str = "", ui: str = "now
                             except Exception as e:
                                 st.error(f"기록하지 못했습니다. {e}")
     all_text = "\n\n".join(f"■ {it['name']} ({'있음' if it['has_idea'] else '없음'})\n{it['fact']}\n"
-                            + (staff.idea_engine_input(it) if it["has_idea"] else "빠진 조건: " + ", ".join(it["missing"]))
+                            + (staff.idea_engine_input(it, result.get("format", "")) if it["has_idea"] else "빠진 조건: " + ", ".join(it["missing"]))
                             + "\n출처: " + " ".join(src[i]["url"] for i in it.get("ids", []) if i in src) for it in items)
     st.download_button("목록 전체를 텍스트로 받기", all_text, file_name=f"STORY_OFFICE_소재판별_{datetime.now(KST):%Y%m%d_%H%M}.txt", key=f"dl_{ui}_{scan_id}")
 
@@ -361,11 +368,14 @@ def meeting_section() -> None:
                              help="장르 담당은 그 장르의 재미가 바로 생길 현실을 자기만의 곳에서 찾고, 그 장르의 재미가 서는지까지 함께 봅니다.")
         direction = st.text_input("방향 한 줄 (비워도 됩니다)",
                                   placeholder="예: 베트남 / 사라지는 직업 / 일본 지방 소도시")
+        fmt = st.selectbox("형식", ["형식 미정"] + list(staff.FORMAT_DESKS),
+                           help="형식을 고르면 그 형식이 서는 구조(영화는 닫히는 사건 하나, 숏폼은 1분 반전이 반복되는 관계 등)가 소재 안에 있는지까지 봅니다. 넘길 엔진도 형식에 맞춰 바뀝니다.")
         go = st.form_submit_button("소재 찾고 판별하기", type="primary", disabled=running)
     if running:
         st.caption("판별이 진행 중이라 끝난 뒤에 다시 시작할 수 있습니다.")
     if go and not running:
-        jid = _start_meeting(api_key, direction, "" if genre.startswith("장르 없이") else genre, arc)
+        jid = _start_meeting(api_key, direction, "" if genre.startswith("장르 없이") else genre, arc,
+                             "" if fmt == "형식 미정" else fmt)
         st.session_state["job_id"] = jid
         st.rerun()
 
@@ -380,6 +390,7 @@ def meeting_section() -> None:
             st.code("\n".join(job["log"]), language=None)
     elif job and job["status"] == "done":
         st.caption(f"시작 {job['started_label']} · {job['elapsed']} 소요 · {job.get('genre') or '장르 없이'}"
+                   + (f" · {job['format']}" if job.get("format") else "")
                    + (f" · 방향: {job['direction']}" if job["direction"] else ""))
         if job.get("save_error"):
             st.caption(f"보관함에 저장하지 못했습니다. {job['save_error']}")
@@ -423,7 +434,7 @@ def _log(job: dict, msg: str) -> None:
     print(f"[STORY OFFICE] {line}", flush=True)   # Streamlit 로그에도 남김
 
 
-def _start_meeting(api_key: str, direction: str, genre: str = "", arc=None) -> str:
+def _start_meeting(api_key: str, direction: str, genre: str = "", arc=None, fmt: str = "") -> str:
     import threading
     import traceback
     import uuid
@@ -432,14 +443,14 @@ def _start_meeting(api_key: str, direction: str, genre: str = "", arc=None) -> s
     jid = uuid.uuid4().hex[:8]
     now = datetime.now(KST)
     job = {"status": "running", "log": [], "result": None, "error": "", "started": now.timestamp(),
-           "started_label": f"{now:%m-%d %H:%M}", "elapsed": "", "direction": direction, "genre": genre}
+           "started_label": f"{now:%m-%d %H:%M}", "elapsed": "", "direction": direction, "genre": genre, "format": fmt}
     jobs[jid] = job
     for old in sorted(jobs, key=lambda k: jobs[k]["started"])[:-5]:   # 최근 5건만 보관
         jobs.pop(old, None)
 
     def work():
         import anthropic
-        _log(job, f"시작 · {genre or '장르 없이'} · 방향: {direction or '자유'}")
+        _log(job, f"시작 · {genre or '장르 없이'} · {fmt or '형식 미정'} · 방향: {direction or '자유'}")
         try:
             client = anthropic.Anthropic(api_key=api_key)
             memory = ""
@@ -448,7 +459,7 @@ def _start_meeting(api_key: str, direction: str, genre: str = "", arc=None) -> s
                     memory = storage.memory_note(arc.decisions(genre))
                 except Exception as e:
                     _log(job, f"지난 기록을 읽지 못해 기록 없이 진행합니다 ({e})")
-            result = staff.run_scan(client, direction, progress=lambda m: _log(job, m), genre=genre, memory=memory)
+            result = staff.run_scan(client, direction, progress=lambda m: _log(job, m), genre=genre, memory=memory, fmt=fmt)
             job["result"] = result
             job["status"] = "done"
             _log(job, f"끝 · 이야기 있음 {sum(i['has_idea'] for i in result['items'])}/{len(result['items'])} · 검색 {result['searches']}회")
